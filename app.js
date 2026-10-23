@@ -199,22 +199,51 @@ function applyBrand() {
 async function boot() {
   applyBrand();
   if (!DEMO) {
+    S.recovery = /type=recovery/.test(location.hash);
     sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY);
     sb.auth.onAuthStateChange(async (event) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        const pw = prompt('Escribe tu nueva contraseña (mínimo 6 caracteres):');
-        if (pw) { const { error } = await sb.auth.updateUser({ password: pw }); toast(error ? errMsg(error) : 'Contraseña actualizada'); }
-      }
-      if (event === 'SIGNED_IN' && !S.profile) afterAuth();
+      if (event === 'PASSWORD_RECOVERY') { S.recovery = true; renderRecovery(); return; }
+      if (event === 'SIGNED_IN' && !S.profile && !S.recovery) afterAuth();
     });
   }
   window.addEventListener('hashchange', route);
   await afterAuth();
 }
 
+/* Pantalla para definir una nueva contraseña (enlace de recuperación recibido por correo) */
+function renderRecovery() {
+  document.body.classList.remove('authed');
+  document.getElementById('nav').innerHTML = '';
+  const m = view();
+  m.innerHTML = `<div class="login">
+    ${BRAND.logoFull ? `<img class="login-logo" src="${esc(BRAND.logoFull)}" alt="${esc(BRAND.name)}">` : '<div class="logo big"></div>'}
+    <div class="card"><h2>Nueva contraseña</h2>
+      <form id="rec-form">
+        <label class="field"><span>Nueva contraseña</span><input class="input" name="pw" type="password" required minlength="6" autocomplete="new-password"></label>
+        <label class="field"><span>Confirmar contraseña</span><input class="input" name="pw2" type="password" required minlength="6" autocomplete="new-password"></label>
+        <button class="btn primary block" type="submit">Guardar contraseña</button>
+      </form></div></div>`;
+  applyBrand();
+  m.onclick = m.oninput = m.onchange = null;
+  m.onsubmit = ev => {
+    ev.preventDefault();
+    const f = new FormData(ev.target);
+    if (f.get('pw') !== f.get('pw2')) return toast('Las contraseñas no coinciden', 'error');
+    safe(async () => {
+      const { error } = await sb.auth.updateUser({ password: f.get('pw') });
+      if (error) throw error;
+      S.recovery = false; m.onsubmit = null;
+      history.replaceState(null, '', location.pathname + '#/');
+      toast('Contraseña actualizada');
+      await afterAuth();
+    });
+  };
+}
+
 async function afterAuth() {
   try {
     const s = await Auth.session();
+    if (S.recovery && s) return renderRecovery();
     if (!s) { S.profile = null; document.body.classList.remove('authed'); return renderLogin(); }
     const p = await DB.select('profiles', { eq: { id: s.user.id } });
     if (!p[0]) { renderNotice('No se encontró tu perfil. Verifica que el archivo schema.sql se ejecutó completo en Supabase.'); return; }
@@ -310,6 +339,7 @@ async function route() {
 function paint(html, h = {}, title) {
   const m = view();
   m.innerHTML = (title ? `<h1 class="vt">${esc(title)}</h1>` : '') + html;
+  m.onsubmit = null;
   m.onclick = h.click ? ev => { const el = ev.target.closest('[data-act]'); if (!el || !m.contains(el)) return; const fn = h.click[el.dataset.act]; if (fn) { ev.preventDefault(); safe(() => fn(el, ev)); } } : null;
   m.oninput = h.input ? ev => safe(() => h.input(ev.target, ev)) : null;
   m.onchange = h.change ? ev => safe(() => h.change(ev.target, ev)) : null;
