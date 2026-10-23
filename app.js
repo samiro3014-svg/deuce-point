@@ -552,7 +552,7 @@ function exCard(e, ei) {
     ${tline ? `<div class="target">Objetivo: ${esc(tline)}</div>` : ''}
     ${hint ? `<div class="hint${hint.up ? ' up' : ''}">${esc(hint.text)}</div>` : ''}
     ${t.notes ? `<div class="note">${esc(t.notes)}</div>` : ''}
-    <div class="set-grid set-head"><span>Serie</span><span>Anterior</span><span>kg</span><span>Reps</span><span>RIR</span><span></span></div>
+    <div class="set-grid set-head"><span>Serie</span><span>Anterior</span><span>${ex.muscle_group === 'Cardio' ? '—' : 'kg'}</span><span>${ex.muscle_group === 'Cardio' ? 'Min' : ex.muscle_group === 'Movilidad' ? 'Reps/s' : 'Reps'}</span><span>RIR</span><span></span></div>
     ${e.sets.map((s, si) => {
       const p = (e.prev || [])[si];
       return `<div class="set-grid set-row${s.done ? ' done' : ''}">
@@ -898,7 +898,10 @@ async function vAsesorados() {
       <button class="btn block" data-act="copy">Copiar enlace de la app</button></div>`;
   paint(html, {
     input: t => { if (t.id === 'cf') { const q = norm(t.value); document.querySelectorAll('.cl-item').forEach(a => { a.hidden = q && !a.dataset.n.includes(q); }); } },
-    click: { copy: async () => { const url = location.origin + location.pathname; try { await navigator.clipboard.writeText(url); toast('Enlace copiado'); } catch (e) { prompt('Copia este enlace:', url); } } }
+    click: {
+      copy: async () => { const url = location.origin + location.pathname; try { await navigator.clipboard.writeText(url); toast('Enlace copiado'); } catch (e) { prompt('Copia este enlace:', url); } },
+      ibPhase2: async el => { if (!confirm('¿Generar y publicar la Fase 2 de este asesorado? La Fase 1 quedará inactiva.')) return; el.disabled = true; const id = await generatePhase2(el.dataset.id); toast('Fase 2 publicada'); location.hash = '#/rutina/' + id; }
+    }
   }, 'Asesorados');
 }
 

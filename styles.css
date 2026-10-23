@@ -363,3 +363,9 @@ body.onboarding { padding-bottom: env(safe-area-inset-bottom); }
   body.print-doc main, body.print-doc header.top, body.print-doc #nav { display: none !important; }
   body.print-doc #print-area { display: block; }
 }
+.ob-help { display: block; font-size: 12px; color: var(--muted); font-weight: 400; margin: -2px 0 6px; line-height: 1.35; }
+.ib-tag.f { background: #efe7fb; color: #5b3a9a; }
+.ib-tag.r { background: #e7f0f8; color: var(--brand); }
+.seg.daytype { margin: 0 0 6px; }
+.tag.peri { background: #edf6e3; color: #3f7a12; font-size: 11px; vertical-align: middle; }
+.card h4 { margin: 14px 0 4px; font-size: 13px; color: var(--brand); }

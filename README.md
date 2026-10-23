@@ -6,6 +6,17 @@ Dirección: https://samiro3014-svg.github.io/deuce-point/
 
 ---
 
+## Motor de cálculo (v4)
+
+- **TMB:** Katch-McArdle (370 + 21,6 × masa libre de grasa) o Cunningham para deportistas (500 + 22 × masa libre de grasa) cuando la composición corporal proviene de InBody, pliegues, DEXA o la evaluación del entrenador. En otro caso, Mifflin-St Jeor (10 × peso + 6,25 × talla − 4,92 × edad + 5 / −161).
+- **Factor de actividad** (según sesiones de entrenamiento y deporte por semana, pasos y tipo de trabajo): sedentario 1,3; leve 1,6 H / 1,5 M; moderado 1,7 H / 1,6 M; intenso 2,1 H / 1,9 M.
+- **Pérdida de grasa:** déficit = peso × 0,75 % semanal × 7.700 / 7, entre 300 y 750 kcal. **Recomposición:** −250 kcal. **Ganancia:** +500 / +350 / +250 kcal según nivel. Todo configurable en Ajustes.
+- **Macronutrientes:** proteína 2,0 g/kg (1,8–2,2), grasa 0,9 g/kg (0,8–1,2, mínimo 20 % de la energía), carbohidratos con el resto del día de entreno; 60 % de los carbohidratos en las comidas pre y post entreno según el horario.
+- **Ciclado:** días de descanso con 125 g menos de carbohidratos (100–150 g), sin bajar de 2 g/kg. El diario «Hoy» detecta el tipo de día y ajusta metas y porciones; el asesorado puede cambiarlo manualmente.
+- **Entrenamiento:** principiantes inician con Fase 1 · Adaptación anatómica (4 semanas, Full Body en circuito). Al terminar aparece en Pendientes «Generar Fase 2». El screening funcional ajusta la selección de ejercicios y agrega hasta 3 ejercicios de movilidad al inicio de la sesión. Cardio en Zona 2 de 20–30 min al final de cada sesión (excepto tenistas con 4 o más sesiones de cancha).
+- **Proyección a 3 meses** en rango (barras): pérdida de grasa con 7.700 kcal/kg y hasta 30 % menos por adaptación metabólica; ganancia muscular según nivel; +1,0–1,5 kg por inicio de creatina.
+- **Recalibración mensual:** botón «Recalcular con datos actuales» en la valoración y aviso en Pendientes cada 28 días.
+
 ## Flujo automatizado
 
 1. **Registro.** El asesorado crea su cuenta con el enlace de la app.
@@ -48,7 +59,11 @@ PAR-Q con alguna respuesta «Sí» (se le indica al asesorado buscar autorizaci�
 
 ---
 
-## Actualización a esta versión (una sola vez)
+## Actualización a la versión 4 (una sola vez)
+
+Supabase › SQL Editor › New query: pegar todo `supabase/migracion-v4.sql` → **Run**. Conserva los valores que ya tengas en Ajustes.
+
+## Actualización a la versión 3 (ya realizada)
 
 1. **Supabase › SQL Editor › New query:** pegar todo `supabase/migracion-v3.sql` → **Run**. Debe terminar en *Success*. Se puede ejecutar de nuevo sin causar errores.
 2. **Supabase › Storage:** verificar que aparece el bucket privado `progress-photos` (lo crea el script).

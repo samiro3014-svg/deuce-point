@@ -133,5 +133,20 @@ window.SEED_FAMILIES = [
     ['Rotación externa con banda', 'Banda'], ['Rotación externa tumbado con mancuerna', 'Mancuernas']] },
   { g: 'Manguito rotador', f: 'Estabilidad escapular', x: [
     ['Y-T-W en banco inclinado', 'Mancuernas'], ['Remo con banda y rotación externa', 'Banda'],
-    ['Serrato en polea', 'Polea']] }
+    ['Serrato en polea', 'Polea']] },
+
+  // MOVILIDAD (screening funcional)
+  { g: 'Movilidad', f: 'Movilidad de tobillo', x: [
+    ['Movilidad de tobillo en pared', 'Peso corporal'], ['Estiramiento de gastrocnemio y sóleo', 'Peso corporal']] },
+  { g: 'Movilidad', f: 'Patrón de bisagra', x: [
+    ['Bisagra de cadera con palo', 'Peso corporal'], ['Estiramiento activo de isquiotibiales', 'Peso corporal']] },
+  { g: 'Movilidad', f: 'Movilidad torácica y escapular', x: [
+    ['Wall angels', 'Peso corporal'], ['Movilidad torácica en cuadrupedia', 'Peso corporal'], ['Dislocaciones de hombro con banda', 'Banda']] },
+  { g: 'Movilidad', f: 'Movilidad de cadera', x: [
+    ['Apertura de cadera 90/90', 'Peso corporal'], ['Sentadilla profunda asistida', 'Peso corporal']] },
+
+  // CARDIO ZONA 2
+  { g: 'Cardio', f: 'Cardio Zona 2', x: [
+    ['Caminata inclinada en banda (Zona 2)', 'Máquina'], ['Bicicleta estática (Zona 2)', 'Máquina'], ['Elíptica (Zona 2)', 'Máquina'],
+    ['Remo ergómetro (Zona 2)', 'Máquina'], ['Caminata al aire libre (Zona 2)', 'Peso corporal']] }
 ];
