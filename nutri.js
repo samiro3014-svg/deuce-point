@@ -17,6 +17,25 @@ const RAW_FACTORS = [['Arroz', 0.35], ['Pasta', 0.42], ['Quinua', 0.33], ['Fríj
 
 S.foods = []; S.foodById = {}; S.editOpt = {};
 
+/* Estructura base de 5 comidas con 2 opciones (usada en la demo y como plan base de la generación automática) */
+const NUTRI_BASE = [
+  ['Desayuno', '7:00', 'Consumir dentro de la primera hora después de despertar.', [
+    ['Opción 1', [['Huevo entero', 100], ['Arepa de maíz', 80], ['Queso campesino', 30], ['Papaya', 150]]],
+    ['Opción 2', [['Avena en hojuelas', 50], ['Leche descremada', 250], ['Banano', 100], ['Proteína whey (polvo)', 30]]]]],
+  ['Media mañana', '10:00', '', [
+    ['Opción 1', [['Yogur griego natural sin azúcar', 170], ['Fresa', 100], ['Almendras', 15]]],
+    ['Opción 2', [['Cuajada', 60], ['Mandarina', 180], ['Galletas de arroz', 18]]]]],
+  ['Almuerzo', '13:00', 'Servir primero la ensalada. Preparaciones a la plancha, al horno o sudadas.', [
+    ['Opción 1', [['Arroz blanco cocido', 150], ['Pechuga de pollo cocida', 150], ['Fríjol rojo cocido', 80], ['Lechuga', 50], ['Tomate', 80], ['Aguacate', 50], ['Aceite de oliva', 5]]],
+    ['Opción 2', [['Papa cocida', 200], ['Carne de res magra cocida', 140], ['Brócoli cocido', 100], ['Arroz blanco cocido', 60], ['Aguacate', 50]]]]],
+  ['Merienda', '16:00', 'En días de entrenamiento, consumir 60 a 90 minutos antes de la sesión.', [
+    ['Opción 1', [['Pan tajado integral', 50], ['Atún en agua escurrido', 80], ['Manzana', 150]]],
+    ['Opción 2', [['Kumis', 200], ['Galletas de arroz', 18], ['Mantequilla de maní', 16]]]]],
+  ['Cena', '19:30', '', [
+    ['Opción 1', [['Tilapia cocida', 150], ['Plátano maduro cocido', 100], ['Ensalada verde mixta', 120], ['Aceite de oliva', 5]]],
+    ['Opción 2', [['Pechuga de pollo cocida', 130], ['Quinua cocida', 120], ['Espinaca', 60], ['Aguacate', 40]]]]]];
+
+
 /* ---------- utilidades ---------- */
 const pad2 = n => String(n).padStart(2, '0');
 const dateStr = d => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
@@ -290,8 +309,9 @@ async function vHoy(date, cid) {
     <div class="mb-t"><div class="mb-f w" style="width:${Math.min(100, water / waterT * 100).toFixed(1)}%"></div></div>
     <div class="row-btns"><button class="btn sm" data-act="water" data-d="-250">− 250 ml</button><button class="btn sm primary" data-act="water" data-d="250">+ 250 ml</button><button class="btn sm" data-act="water" data-d="500">+ 500 ml</button></div></div>`;
   if (own && isToday) html += await workoutCardHtml(cid);
+  if (own && isToday && typeof checkinCardsHtml === 'function' && !S.needsMigration) html += await checkinCardsHtml(cid).catch(() => '');
 
-  if (!plan) html += `<div class="card empty"><p>${own ? 'Tu entrenador todavía no te ha asignado un plan nutricional.' : 'Este asesorado no tiene un plan nutricional activo.'}</p><p class="small muted">Puedes registrar alimentos libremente en cada comida.</p></div>`;
+  if (!plan) html += `<div class="card empty"><p>${own ? (S.intake && S.intake.status === 'pending' ? 'Tu entrenador está revisando tu valoración y tu plan nutricional. Cuando lo apruebe aparecerá aquí.' : 'Tu entrenador todavía no te ha asignado un plan nutricional.') : 'Este asesorado no tiene un plan nutricional activo.'}</p><p class="small muted">Puedes registrar alimentos libremente en cada comida.</p></div>`;
   const meals = plan ? plan.meals : DEFAULT_MEALS.map(([n, tl]) => ({ id: null, name: n, time_label: tl, options: [] }));
   const used = new Set(); const itemMap = {};
   const itemRow = (it, meal, log) => {
@@ -543,7 +563,7 @@ async function adherenceSection(cid, dayLink) {
 }
 
 /* Pestañas de Progreso del asesorado */
-const progSeg = a => `<div class="seg tabs">${[['historial', 'Entrenamiento'], ['progreso', 'Ejercicios'], ['cuerpo', 'Cuerpo'], ['adherencia', 'Nutrición']].map(([k, l]) => `<a class="${a === k ? 'on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
+const progSeg = a => `<div class="chips scroll tabs2">${[['historial', 'Entrenamiento'], ['progreso', 'Ejercicios'], ['cuerpo', 'Cuerpo'], ['adherencia', 'Nutrición'], ['fotos', 'Fotos']].map(([k, l]) => `<a class="chip${a === k ? ' on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
 async function vCuerpo() { const b = await bodySection(S.profile.id); paint(progSeg('cuerpo') + b.html, { click: b.click }, 'Progreso'); }
 async function vAdherencia() { const a = await adherenceSection(S.profile.id, d => '#/hoy/' + d); paint(progSeg('adherencia') + a.html, {}, 'Progreso'); }
 
@@ -554,7 +574,7 @@ async function coachNutriTab(cid) {
   const plans = await DB.select('nutrition_plans', { eq: { client_id: cid }, order: 'created_at', asc: false });
   const html = `<div class="row-btns"><button class="btn primary" data-act="nNew">+ Nuevo plan</button><button class="btn" data-act="nTpl">Desde plantilla</button><a class="btn" href="#/diario/${cid}/${todayStr()}">Ver diario</a></div>
     ${plans.length ? plans.map(p => `<div class="card">
-      <div class="day-h"><div><h3>${esc(p.name)}</h3><small class="muted">${esc(targetsLine(p))}</small></div><span class="badge ${p.active ? 'ok' : ''}">${p.active ? 'Activo' : 'Inactivo'}</span></div>
+      <div class="day-h"><div><h3>${esc(p.name)}</h3><small class="muted">${esc(targetsLine(p))}</small></div><span class="badge ${p.review ? 'warnb' : p.active ? 'ok' : ''}">${p.review ? 'Borrador' : p.active ? 'Activo' : 'Inactivo'}</span></div>
       <div class="row-btns"><a class="btn sm primary" href="#/plan-nutri/${p.id}">Editar</a><a class="btn sm" href="#/plan-ver/${p.id}">Ver / PDF</a><button class="btn sm" data-act="nToggle" data-id="${p.id}" data-on="${p.active ? 1 : 0}">${p.active ? 'Desactivar' : 'Activar'}</button><button class="btn sm" data-act="nDup" data-id="${p.id}">Duplicar</button><button class="btn sm danger-outline" data-act="nDel" data-id="${p.id}">Eliminar</button></div>
     </div>`).join('') : '<div class="card empty"><p>Este asesorado no tiene plan nutricional. Crea uno nuevo o parte de una plantilla.</p></div>'}
     <p class="small muted">Solo un plan puede estar activo: es el que el asesorado ve en su diario.</p>`;
@@ -637,6 +657,7 @@ async function vPlanEditor(id) {
   const inp = (tbl, rid, f, v, extra = '') => `<input class="input" data-tbl="${tbl}" data-id="${rid}" data-f="${f}" value="${esc(v ?? '')}" ${extra}>`;
 
   let html = `<a class="linkbtn" href="${back}">← ${esc(client ? client.full_name : 'Plantillas')}</a>
+    ${plan.review ? `<div class="warn-box small">Borrador generado automáticamente a partir de la valoración inicial. Revísalo y publícalo con «Aprobar y publicar» en la pestaña <a href="#/asesorado/${plan.client_id}/valoracion">Valoración</a>.</div>` : ''}
     <div class="card">
       <label class="field"><span>Nombre del plan</span>${inp('nutrition_plans', id, 'name', plan.name)}</label>
       <div class="rex-grid"><label><span>kcal</span>${inp('nutrition_plans', id, 'kcal', plan.kcal, 'inputmode="numeric" data-type="num"')}</label><label><span>Proteína g</span>${inp('nutrition_plans', id, 'protein_g', plan.protein_g, 'inputmode="numeric" data-type="num"')}</label><label><span>Carbs g</span>${inp('nutrition_plans', id, 'carbs_g', plan.carbs_g, 'inputmode="numeric" data-type="num"')}</label><label><span>Grasa g</span>${inp('nutrition_plans', id, 'fat_g', plan.fat_g, 'inputmode="numeric" data-type="num"')}</label></div>
@@ -698,7 +719,7 @@ async function vPlanEditor(id) {
       if (t.dataset.type === 'num') v = t.value.trim() === '' ? null : num(t.value);
       if (tbl === 'plan_items' && f === 'grams' && !(v > 0)) { toast('Indica una cantidad mayor que cero', 'error'); return rerender(); }
       if (tbl === 'nutrition_plans' && f === 'active' && v && plan.client_id) await deactivatePlans(plan.client_id, id);
-      await DB.update(tbl, rid, { [f]: v });
+      await DB.update(tbl, rid, Object.assign({ [f]: v }, tbl === 'nutrition_plans' && f === 'active' && v ? { review: false } : {}));
       if ((tbl === 'plan_items' && f === 'grams') || (tbl === 'nutrition_plans' && /kcal|_g$/.test(f))) rerender(); else toast('Guardado');
     },
     click: {
@@ -827,22 +848,7 @@ function buildNutritionDemo(d) {
   for (const c of (window.SEED_FOODS || [])) for (const [name, kcal, protein, carbs, fat, fiber, un, ug] of c.x)
     d.foods.push({ id: uid(), name, category: c.cat, kcal, protein, carbs, fat, fiber: fiber || 0, unit_name: un || '', unit_grams: ug || null, created_at: iso });
   const F = n => { const x = d.foods.find(f => f.name === n); if (!x) throw new Error('Falta alimento demo: ' + n); return x; };
-  const BASE = [
-    ['Desayuno', '7:00', 'Consumir dentro de la primera hora después de despertar.', [
-      ['Opción 1', [['Huevo entero', 100], ['Arepa de maíz', 80], ['Queso campesino', 30], ['Papaya', 150]]],
-      ['Opción 2', [['Avena en hojuelas', 50], ['Leche descremada', 250], ['Banano', 100], ['Proteína whey (polvo)', 30]]]]],
-    ['Media mañana', '10:00', '', [
-      ['Opción 1', [['Yogur griego natural sin azúcar', 170], ['Fresa', 100], ['Almendras', 15]]],
-      ['Opción 2', [['Cuajada', 60], ['Mandarina', 180], ['Galletas de arroz', 18]]]]],
-    ['Almuerzo', '13:00', 'Servir primero la ensalada. Preparaciones a la plancha, al horno o sudadas.', [
-      ['Opción 1', [['Arroz blanco cocido', 150], ['Pechuga de pollo cocida', 150], ['Fríjol rojo cocido', 80], ['Lechuga', 50], ['Tomate', 80], ['Aguacate', 50], ['Aceite de oliva', 5]]],
-      ['Opción 2', [['Papa cocida', 200], ['Carne de res magra cocida', 140], ['Brócoli cocido', 100], ['Arroz blanco cocido', 60], ['Aguacate', 50]]]]],
-    ['Merienda', '16:00', 'En días de entrenamiento, consumir 60 a 90 minutos antes de la sesión.', [
-      ['Opción 1', [['Pan tajado integral', 50], ['Atún en agua escurrido', 80], ['Manzana', 150]]],
-      ['Opción 2', [['Kumis', 200], ['Galletas de arroz', 18], ['Mantequilla de maní', 16]]]]],
-    ['Cena', '19:30', '', [
-      ['Opción 1', [['Tilapia cocida', 150], ['Plátano maduro cocido', 100], ['Ensalada verde mixta', 120], ['Aceite de oliva', 5]]],
-      ['Opción 2', [['Pechuga de pollo cocida', 130], ['Quinua cocida', 120], ['Espinaca', 60], ['Aguacate', 40]]]]]];
+  const BASE = NUTRI_BASE;
   const mk = (clientId, name, factor, water, notes) => {
     const p = { id: uid(), client_id: clientId, is_template: !clientId, name, kcal: 0, protein_g: 0, carbs_g: 0, fat_g: 0, water_ml: water, notes, active: !!clientId, created_at: new Date(Date.now() - 20 * 864e5).toISOString() };
     d.nutrition_plans.push(p); let tot = ZERO();

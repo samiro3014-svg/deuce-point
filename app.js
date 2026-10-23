@@ -66,7 +66,7 @@ function matchRow(row, o) {
 const CASCADE = {
   routines: [['routine_days', 'routine_id']], routine_days: [['routine_exercises', 'day_id']], workouts: [['workout_sets', 'workout_id']],
   nutrition_plans: [['plan_meals', 'plan_id']], plan_meals: [['plan_options', 'meal_id']], plan_options: [['plan_items', 'option_id']],
-  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id']]
+  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id']]
 };
 const RESTRICT = { exercises: [['routine_exercises', 'exercise_id'], ['workout_sets', 'exercise_id']], foods: [['plan_items', 'food_id']] };
 function cascadeDelete(d, table, id) {
@@ -104,13 +104,16 @@ const DB = {
     }
     const { data, error } = await sb.from(table).insert(arr).select(); if (error) throw error; return data;
   },
-  async update(table, id, patch) {
-    if (DEMO) { const r = (dd()[table] || []).find(x => x.id === id); if (r) Object.assign(r, patch); saveDemo(); return r ? { ...r } : null; }
-    const { data, error } = await sb.from(table).update(patch).eq('id', id).select(); if (error) throw error; return data && data[0];
+  async update(table, id, patch, key = 'id') {
+    if (DEMO) { const r = (dd()[table] || []).find(x => x[key] === id); if (r) Object.assign(r, patch); saveDemo(); return r ? { ...r } : null; }
+    const { data, error } = await sb.from(table).update(patch).eq(key, id).select(); if (error) throw error; return data && data[0];
   },
-  async remove(table, id) {
-    if (DEMO) { cascadeDelete(dd(), table, id); saveDemo(); return; }
-    const { error } = await sb.from(table).delete().eq('id', id); if (error) throw error;
+  async remove(table, id, key = 'id') {
+    if (DEMO) { if (key === 'id') cascadeDelete(dd(), table, id); else dd()[table] = (dd()[table] || []).filter(x => x[key] !== id); saveDemo(); return; }
+    const { error } = await sb.from(table).delete().eq(key, id); if (error) throw error;
+  },
+  async rpc(name, args = {}) {
+    const { data, error } = await sb.rpc(name, args); if (error) throw error; return data || [];
   }
 };
 
@@ -125,7 +128,12 @@ const Auth = {
     if (error) throw error; return data;
   },
   async reset(email) { const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname }); if (error) throw error; },
-  async signOut() { if (DEMO) localStorage.removeItem('ent_demo_user'); else await sb.auth.signOut(); }
+  async signOut() {
+    // Borra de la memoria las llaves de fotos y las imágenes descifradas
+    Object.values(S.photoCache || {}).forEach(u => URL.revokeObjectURL(u));
+    Object.assign(S, { photoKey: null, photoRaw: null, coachPriv: null, clientKeys: {}, photoCache: {}, cmp: {}, intake: null, needsIntake: false });
+    if (DEMO) localStorage.removeItem('ent_demo_user'); else await sb.auth.signOut();
+  }
 };
 
 /* =====================================================================
@@ -180,6 +188,7 @@ function buildDemoData() {
     });
   }
   if (window.buildNutritionDemo) buildNutritionDemo(d);
+  if (window.buildAutoDemo) buildAutoDemo(d);
   return d;
 }
 
@@ -248,7 +257,15 @@ async function afterAuth() {
     const p = await DB.select('profiles', { eq: { id: s.user.id } });
     if (!p[0]) { renderNotice('No se encontró tu perfil. Verifica que el archivo schema.sql se ejecutó completo en Supabase.'); return; }
     S.profile = p[0];
-    await Promise.all([loadExercises(), loadFoods()]);
+    await Promise.all([loadExercises(), loadFoods(), loadSettings()]);
+    S.needsIntake = false; S.intake = null;
+    if (S.profile.role === 'client' && !S.needsMigration) {
+      S.intake = (await DB.select('intakes', { eq: { client_id: S.profile.id } }))[0] || null;
+      if (!S.intake) {
+        const [np, rt] = await Promise.all([DB.select('nutrition_plans', { eq: { client_id: S.profile.id }, limit: 1 }), DB.select('routines', { eq: { client_id: S.profile.id }, limit: 1 })]);
+        S.needsIntake = !np.length && !rt.length;
+      }
+    }
     document.body.classList.add('authed');
     renderNav();
     route();
@@ -287,8 +304,8 @@ function renderNav() {
 function setActiveNav(name) {
   const coach = S.profile.role === 'coach';
   const map = coach
-    ? { '': 'asesorados', asesorado: 'asesorados', rutina: 'asesorados', resumen: 'asesorados', diario: 'asesorados', 'plan-nutri': 'asesorados', 'plan-ver': 'asesorados', compras: 'asesorados', ejercicio: 'biblioteca', alimentos: 'biblioteca', alimento: 'biblioteca' }
-    : { '': 'hoy', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', 'plan-ver': 'hoy', compras: 'hoy' };
+    ? { '': 'asesorados', asesorado: 'asesorados', rutina: 'asesorados', resumen: 'asesorados', diario: 'asesorados', 'plan-nutri': 'asesorados', 'plan-ver': 'asesorados', compras: 'asesorados', ajustes: 'asesorados', ejercicio: 'biblioteca', alimentos: 'biblioteca', alimento: 'biblioteca' }
+    : { '': 'hoy', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', fotos: 'historial', 'plan-ver': 'hoy', compras: 'hoy', checkin: 'hoy', valoracion: 'perfil' };
   const key = map[name] ?? name;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.nav === key));
   const pill = document.getElementById('live-pill');
@@ -298,6 +315,7 @@ function setActiveNav(name) {
 async function route() {
   if (!S.profile) return;
   clearInterval(S.tick); S.tick = null; closeModal();
+  document.body.classList.remove('onboarding');
   const parts = (location.hash || '#/').slice(1).split('/').filter(Boolean);
   const [name = '', a, b, c] = /^(access_token|type|error)/.test(parts[0] || '') ? [] : parts;
   setActiveNav(name);
@@ -318,10 +336,15 @@ async function route() {
       if (name === 'compras') return await vCompras(a, b);
       if (name === 'diario') return await vHoy(b, a);
       if (name === 'resumen') return await vResumen(a);
+      if (name === 'ajustes') return await vAjustes();
       if (name === 'perfil') return vPerfil();
       return await vAsesorados();
     }
+    if (S.needsIntake && name !== 'perfil') return vOnboarding();
     if (name === 'plan') return await vPlan();
+    if (name === 'valoracion') return await vMiValoracion();
+    if (name === 'checkin') return await vCheckin();
+    if (name === 'fotos') return await vFotos();
     if (name === 'entreno') return vEntreno();
     if (name === 'historial') return paint(progSeg('historial') + await historialHtml(S.profile.id), {}, 'Progreso');
     if (name === 'progreso') return await vProgreso(S.profile.id, '#/progreso', a, 'Progreso', progSeg('progreso'));
@@ -385,7 +408,8 @@ function renderLogin() {
       <div class="card"><p class="small"><b>Modo demostración.</b> Los datos se guardan solo en este dispositivo. Para usar la app con tus asesorados, conecta Supabase en <code>config.js</code>.</p>
       <button class="btn primary block" data-demo="demo-coach">Entrar como entrenador</button>
       <button class="btn block" data-demo="demo-ana">Entrar como asesorada (Ana)</button>
-      <button class="btn block" data-demo="demo-juan">Entrar como asesorado (Juan)</button></div></div>`;
+      <button class="btn block" data-demo="demo-juan">Entrar como asesorado (Juan)</button>
+      <button class="btn block" data-demo="demo-laura">Entrar como asesorada nueva (Laura · valoración inicial)</button></div></div>`;
     applyBrand();
     m.onclick = ev => { const b = ev.target.closest('[data-demo]'); if (b) { localStorage.setItem('ent_demo_user', b.dataset.demo); afterAuth(); } };
     m.oninput = m.onchange = null;
@@ -452,7 +476,9 @@ async function vPlan() {
   if (draft) html += `<div class="card live"><div><b>Sesión en curso</b><div class="small">${esc(draft.day_name || 'Sesión libre')} · iniciada ${new Date(draft.started_at).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div></div><a class="btn primary" href="#/entreno">Continuar</a></div>`;
   html += `<div class="stats3"><div><b>${thisWeek.length}</b><small>Sesiones esta semana</small></div><div><b>${fmtKg(thisWeek.reduce((a, w) => a + num(w.total_volume), 0))}</b><small>Volumen semanal</small></div><div><b>${recent.length ? fmtDateShort(recent[0].started_at) : '—'}</b><small>Última sesión</small></div></div>`;
 
-  if (!routines.length) html += `<div class="card empty"><p>Tu entrenador todavía no te ha asignado una rutina.</p><p class="small muted">Cuando la asigne aparecerá aquí con tus días de entrenamiento.</p></div>`;
+  if (!routines.length) html += S.intake && S.intake.status === 'pending'
+    ? `<div class="card empty"><p>Tu entrenador está revisando tu valoración y tu rutina.</p><p class="small muted">Cuando la apruebe aparecerá aquí con tus días de entrenamiento.</p></div>`
+    : `<div class="card empty"><p>Tu entrenador todavía no te ha asignado una rutina.</p><p class="small muted">Cuando la asigne aparecerá aquí con tus días de entrenamiento.</p></div>`;
   for (const r of routines) {
     html += `<h2 class="sec">${esc(r.name)}</h2>${r.notes ? `<p class="note">${esc(r.notes)}</p>` : ''}`;
     for (const d of days.filter(x => x.routine_id === r.id)) {
@@ -519,10 +545,12 @@ function exCard(e, ei) {
   const t = e.target || {};
   const tline = [t.sets ? `${t.sets} × ${t.reps || '-'}` : '', t.rir ? `RIR ${t.rir}` : '', t.rest ? `Descanso ${t.rest} s` : ''].filter(Boolean).join(' · ');
   const doneCount = e.sets.filter(s => s.done).length;
+  const hint = typeof progressionHint === 'function' ? progressionHint(e) : null;
   return `<div class="card ex-card${doneCount && doneCount === e.sets.length ? ' complete' : ''}">
     <div class="ex-title"><button class="link-title" data-act="info" data-id="${esc(e.exercise_id)}">${esc(ex.name)}</button><span class="tag">${esc(ex.muscle_group)}</span></div>
     ${orig ? `<div class="swapped">Sustituye a: ${esc(orig.name)}</div>` : ''}
     ${tline ? `<div class="target">Objetivo: ${esc(tline)}</div>` : ''}
+    ${hint ? `<div class="hint${hint.up ? ' up' : ''}">${esc(hint.text)}</div>` : ''}
     ${t.notes ? `<div class="note">${esc(t.notes)}</div>` : ''}
     <div class="set-grid set-head"><span>Serie</span><span>Anterior</span><span>kg</span><span>Reps</span><span>RIR</span><span></span></div>
     ${e.sets.map((s, si) => {
@@ -530,7 +558,7 @@ function exCard(e, ei) {
       return `<div class="set-grid set-row${s.done ? ' done' : ''}">
         <span class="set-n">${si + 1}</span>
         <span class="prev">${p ? `${fmtN(p.w)} × ${p.r}` : '—'}</span>
-        <input inputmode="decimal" data-ei="${ei}" data-si="${si}" data-f="w" value="${esc(s.w)}" placeholder="${p ? esc(fmtN(p.w)) : '0'}" aria-label="Kilos serie ${si + 1}">
+        <input inputmode="decimal" data-ei="${ei}" data-si="${si}" data-f="w" value="${esc(s.w)}" placeholder="${hint ? esc(fmtN(hint.w)) : p ? esc(fmtN(p.w)) : '0'}" aria-label="Kilos serie ${si + 1}">
         <input inputmode="numeric" data-ei="${ei}" data-si="${si}" data-f="r" value="${esc(s.r)}" placeholder="${p ? esc(p.r) : esc(String(t.reps || '').split('-')[0])}" aria-label="Repeticiones serie ${si + 1}">
         <input inputmode="decimal" data-ei="${ei}" data-si="${si}" data-f="rir" value="${esc(s.rir)}" placeholder="${esc(t.rir || '')}" aria-label="RIR serie ${si + 1}">
         <button class="chk" data-act="check" data-ei="${ei}" data-si="${si}" aria-label="Completar serie ${si + 1}">✓</button>
@@ -567,7 +595,9 @@ function vEntreno() {
         if (s.done) { s.done = false; }
         else {
           const p = (e.prev || [])[si];
-          if (s.w === '' && p) s.w = String(p.w);
+          const hint = typeof progressionHint === 'function' ? progressionHint(e) : null;
+          if (s.w === '' && hint) s.w = String(hint.w);
+          else if (s.w === '' && p) s.w = String(p.w);
           if (s.r === '' && p) s.r = String(p.r);
           if (s.r === '' || num(s.r) <= 0) { toast('Indica las repeticiones de la serie', 'error'); return; }
           if (s.w === '') s.w = '0';
@@ -822,12 +852,18 @@ async function vProgreso(cid, base, exId, title, prefix = '') {
    Perfil
    ===================================================================== */
 function vPerfil() {
-  const p = S.profile;
+  const p = S.profile; const client = p.role === 'client';
   paint(`<div class="card">
       <label class="field"><span>Nombre</span><input class="input" data-f="full_name" value="${esc(p.full_name || '')}"></label>
       <label class="field"><span>Correo</span><input class="input" value="${esc(p.email || '')}" disabled></label>
+      <label class="field"><span>WhatsApp</span><input class="input" data-f="phone" inputmode="tel" value="${esc(p.phone || '')}" placeholder="3001234567"></label>
       <p class="small muted">Rol: ${p.role === 'coach' ? 'Entrenador' : 'Asesorado'}</p>
     </div>
+    ${client ? `<a class="card row-link" href="#/valoracion"><div><b>Mi valoración inicial</b><small class="muted">Ver o descargar en PDF y HTML</small></div><span class="chev">›</span></a>
+      <a class="card row-link" href="#/checkin"><div><b>Check-in semanal</b><small class="muted">Peso, cumplimiento y sensaciones de la semana</small></div><span class="chev">›</span></a>
+      <a class="card row-link" href="#/fotos"><div><b>Fotos de progreso</b><small class="muted">Protegidas con tu contraseña de fotos</small></div><span class="chev">›</span></a>
+      ${waBtn(S.settings.whatsapp, `Hola, soy ${p.full_name || ''}, asesorado de ${BRAND.name}.`, 'Escribir a mi entrenador por WhatsApp', 'btn block')}`
+      : '<a class="card row-link" href="#/ajustes"><div><b>Ajustes de automatización</b><small class="muted">Publicación de planes, cálculos, plantillas, WhatsApp y fotos</small></div><span class="chev">›</span></a>'}
     ${DEMO ? '<button class="btn block" data-act="reset">Restablecer datos de demostración</button>' : ''}
     <button class="btn danger-outline block" data-act="out">Cerrar sesión</button>
     <p class="small muted center">${esc(BRAND.name)} · ${esc(BRAND.tagline)}</p>`, {
@@ -851,14 +887,14 @@ async function vAsesorados() {
   recent.forEach(w => { if (!last[w.client_id]) last[w.client_id] = w; if (w.started_at >= since) wk[w.client_id] = (wk[w.client_id] || 0) + 1; });
   const withRoutine = new Set(routines.map(r => r.client_id));
   const withPlan = new Set(nplans.map(p => p.client_id));
-  const html = `
+  const html = `${await inboxHtml(clients)}
     <div class="stats3"><div><b>${clients.length}</b><small>Asesorados</small></div><div><b>${Object.keys(wk).length}</b><small>Activos 7 días</small></div><div><b>${Object.values(wk).reduce((a, b) => a + b, 0)}</b><small>Sesiones 7 días</small></div></div>
     <input class="input" id="cf" placeholder="Buscar asesorado">
     ${clients.length ? clients.map(c => `<a class="card row-link cl-item" data-n="${esc(norm(c.full_name + ' ' + c.email))}" href="#/asesorado/${c.id}">
       <div><b>${esc(c.full_name || c.email)}</b><small class="muted">${last[c.id] ? 'Última sesión ' + fmtDateShort(last[c.id].started_at) : 'Sin sesiones registradas'}${withRoutine.has(c.id) ? '' : ' · <span class="warn">sin rutina activa</span>'}${withPlan.has(c.id) ? '' : ' · <span class="warn">sin plan nutricional</span>'}</small></div>
       <span class="kpi">${wk[c.id] || 0}<small>7 días</small></span></a>`).join('')
       : '<div class="card empty"><p>Aún no hay asesorados registrados.</p></div>'}
-    <div class="card"><h3>Añadir asesorados</h3><p class="small">Comparte el enlace de la app. Cada asesorado crea su cuenta con su correo y aparece automáticamente en esta lista para asignarle una rutina.</p>
+    <div class="card"><h3>Añadir asesorados</h3><p class="small">Comparte el enlace de la app. Cada asesorado crea su cuenta, completa la valoración inicial y el sistema genera su plan nutricional y su rutina. Según tus ajustes, quedan en revisión en Pendientes o se publican automáticamente.</p>
       <button class="btn block" data-act="copy">Copiar enlace de la app</button></div>`;
   paint(html, {
     input: t => { if (t.id === 'cf') { const q = norm(t.value); document.querySelectorAll('.cl-item').forEach(a => { a.hidden = q && !a.dataset.n.includes(q); }); } },
@@ -870,16 +906,19 @@ async function vAsesorado(id, tab, sub) {
   const c = (await DB.select('profiles', { eq: { id } }))[0];
   if (!c) return paint('<div class="card"><p>Asesorado no encontrado.</p></div>');
   const base = '#/asesorado/' + id;
-  const tabs = `<div class="chips scroll tabs2">${[['rutinas', 'Entreno'], ['nutricion', 'Nutrición'], ['seguimiento', 'Seguimiento'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios']].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
-  const head = `<div class="card"><p class="small muted">${esc(c.email || '')}</p>
+  const tabs = `<div class="chips scroll tabs2">${[['valoracion', 'Valoración'], ['rutinas', 'Entreno'], ['nutricion', 'Nutrición'], ['seguimiento', 'Seguimiento'], ['checkins', 'Check-ins'], ['fotos', 'Fotos'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios']].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
+  const head = `<div class="card"><div class="day-h"><p class="small muted">${esc(c.email || '')}${c.phone ? ' · ' + esc(c.phone) : ''}</p>${waBtn(c.phone, `Hola ${firstName(c.full_name)}, `)}</div>
     <label class="field"><span>Objetivo del asesorado</span><textarea class="input" rows="2" data-goal placeholder="Ej.: Tenista juvenil · fuerza y potencia para la temporada">${esc(c.goal || '')}</textarea></label></div>`;
   let body = '';
   const handlers = { click: {}, change: async t => { if ('goal' in t.dataset) { await DB.update('profiles', id, { goal: t.value.trim() }); toast('Objetivo guardado'); } } };
 
+  let after = null;
+  const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab };
   if (tab === 'historial') body = await historialHtml(id);
-  else if (tab === 'nutricion' || tab === 'seguimiento') {
-    const r = tab === 'nutricion' ? await coachNutriTab(id) : await coachSeguimientoTab(id);
-    body = r.html; Object.assign(handlers.click, r.click || {});
+  else if (MODS[tab]) {
+    const r = await MODS[tab](id);
+    body = r.html; Object.assign(handlers.click, r.click || {}); after = r.after || null;
+    if (r.change) { const prev = handlers.change; handlers.change = async t => { if (!r.change(t)) await prev(t); }; }
   } else if (tab === 'progreso') {
     body = await progresoHtml(id, base + '/progreso', sub);
     handlers.input = t => { if (t.id === 'pf') { const q = norm(t.value); document.querySelectorAll('.pf-item').forEach(a => { a.hidden = q && !a.dataset.n.includes(q); }); } };
@@ -888,7 +927,7 @@ async function vAsesorado(id, tab, sub) {
     const days = await DB.select('routine_days', { inn: { routine_id: routines.map(r => r.id) } });
     body = `<button class="btn primary block" data-act="newR">+ Nueva rutina</button>
       ${routines.length ? routines.map(r => `<div class="card">
-        <div class="day-h"><div><h3>${esc(r.name)}</h3><small class="muted">${days.filter(d => d.routine_id === r.id).length} días · creada ${fmtDateShort(r.created_at)}</small></div><span class="badge ${r.active ? 'ok' : ''}">${r.active ? 'Activa' : 'Inactiva'}</span></div>
+        <div class="day-h"><div><h3>${esc(r.name)}</h3><small class="muted">${days.filter(d => d.routine_id === r.id).length} días · creada ${fmtDateShort(r.created_at)}</small></div><span class="badge ${r.review ? 'warnb' : r.active ? 'ok' : ''}">${r.review ? 'Borrador' : r.active ? 'Activa' : 'Inactiva'}</span></div>
         <div class="row-btns"><a class="btn sm primary" href="#/rutina/${r.id}">Editar</a><button class="btn sm" data-act="toggle" data-id="${r.id}" data-on="${r.active ? 1 : 0}">${r.active ? 'Desactivar' : 'Activar'}</button><button class="btn sm" data-act="dup" data-id="${r.id}">Duplicar</button><button class="btn sm danger-outline" data-act="delR" data-id="${r.id}">Eliminar</button></div>
       </div>`).join('') : '<div class="card empty"><p>Este asesorado no tiene rutinas. Crea una nueva o duplica la de otro asesorado.</p></div>'}`;
     Object.assign(handlers.click, {
@@ -899,6 +938,7 @@ async function vAsesorado(id, tab, sub) {
     });
   }
   paint(head + tabs + body, handlers, c.full_name || c.email);
+  if (after) after();
 }
 
 async function duplicateModal(routineId) {
@@ -934,6 +974,7 @@ async function vRutina(id) {
 
   const html = `
     <a class="linkbtn" href="${c ? '#/asesorado/' + r.client_id : '#/plantillas'}">← ${esc(c ? c.full_name || 'Asesorado' : 'Plantillas')}</a>
+    ${r.review ? `<div class="warn-box small">Borrador generado automáticamente a partir de la valoración inicial. Revísalo y publícalo con «Aprobar y publicar» en la pestaña <a href="#/asesorado/${r.client_id}/valoracion">Valoración</a>.</div>` : ''}
     <div class="card">
       <label class="field"><span>Nombre de la rutina</span><input class="input" data-tbl="routines" data-id="${r.id}" data-f="name" value="${esc(r.name)}"></label>
       <label class="field"><span>Indicaciones generales</span><textarea class="input" rows="2" data-tbl="routines" data-id="${r.id}" data-f="notes" placeholder="Frecuencia, calentamiento, progresión…">${esc(r.notes || '')}</textarea></label>
@@ -974,7 +1015,7 @@ async function vRutina(id) {
       const { tbl, id: rid, f } = t.dataset; if (!tbl) return;
       let v = t.type === 'checkbox' ? t.checked : t.value.trim();
       if (t.dataset.type === 'int') v = t.value === '' ? null : Math.round(num(t.value));
-      await DB.update(tbl, rid, { [f]: v }); toast('Guardado');
+      await DB.update(tbl, rid, Object.assign({ [f]: v }, tbl === 'routines' && f === 'active' && v ? { review: false } : {})); toast('Guardado');
     },
     click: {
       addDay: async () => { await DB.insert('routine_days', { routine_id: id, name: 'Día ' + (days.length + 1), position: days.length }); route(); },
