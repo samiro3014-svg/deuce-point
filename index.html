@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Deuce Point</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#/"><div class="logo"></div><b class="brand-name"></b></a>
+    <span id="demo-flag" class="badge" hidden>Demo</span>
+    <a id="live-pill" class="live-pill" href="#/entreno" hidden>● Sesión en curso</a>
+  </header>
+
+  <main id="view"><div class="loading"><span></span><span></span><span></span></div></main>
+
+  <nav id="nav"></nav>
+
+  <div id="rest" class="rest" hidden>
+    <div class="rest-bar"><div id="rest-bar"></div></div>
+    <div class="rest-row">
+      <button id="rest-minus" class="btn sm">−15 s</button>
+      <div class="rest-c"><small>Descanso</small><b id="rest-time">0:00</b></div>
+      <button id="rest-plus" class="btn sm">+15 s</button>
+      <button id="rest-skip" class="btn sm primary">Omitir</button>
+    </div>
+  </div>
+
+  <div id="modal" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="config.js"></script>
+  <script src="seed-exercises.js"></script>
+  <script src="seed-foods.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="app.js"></script>
+  <script src="nutri.js"></script>
+</body>
+</html>
