@@ -464,3 +464,38 @@ a.chal { flex-direction: row; } .chal .btn { align-self: flex-start; }
 .iv b { display: block; font-size: 64px; line-height: 1.1; font-variant-numeric: tabular-nums; } .iv small { font-size: 14px; color: var(--muted); }
 .iv.work { background: #e9f4dc; } .iv.rest { background: #e7f0f8; } .iv.prep { background: #fff6e5; } .iv.done { background: #edf6e3; }
 .wk-head .row-btns { margin: 0; }
+
+/* ---------- v7 · tipos de día, importación y expediente ---------- */
+.rex-grid.two { grid-template-columns: 1fr 2fr; }
+.rex-grid.two .input { text-align: left; }
+.chip.sm { padding: 4px 9px; font-size: 12px; }
+.chips.daytypes .chip { font-weight: 600; }
+.dt-ed h3 + .chips { margin-top: 4px; }
+.ov-add { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0; }
+.ov-add .input { margin: 0; padding: 8px; }
+.ov-add .btn { grid-column: span 2; }
+.imp-sum { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 8px 0; }
+.imp-sum div { background: var(--bg); border-radius: 10px; padding: 8px; text-align: center; }
+.imp-sum b { display: block; font-size: 18px; }
+.imp-sum small { color: var(--muted); font-size: 11px; }
+.imp-row { display: grid; grid-template-columns: 22px 1fr auto; gap: 6px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.imp-row .st { font-weight: 700; text-align: center; }
+.imp-row .st.ok { color: var(--ok, #2e8b57); }
+.imp-row .st.ap { color: #c58a00; }
+.imp-row .st.no { color: var(--danger, #c0392b); }
+.imp-row small { display: block; color: var(--muted); }
+.imp-row .btn { padding: 4px 8px; font-size: 12px; }
+textarea.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.alert-i { border-left: 4px solid var(--line); padding: 6px 10px; margin: 6px 0; background: var(--bg); border-radius: 0 8px 8px 0; font-size: 13px; }
+.alert-i.alta { border-color: #c0392b; }
+.alert-i.media { border-color: #d39e00; }
+.alert-i.baja { border-color: #2e8b57; }
+.alert-i b { display: block; }
+.doc-frame { width: 100%; height: 70vh; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.pend-q { margin: 8px 0; }
+.pend-q p { margin: 0 0 4px; font-size: 14px; }
+.pend-q small { color: var(--muted); }
+.doc-x { overflow-x: auto; max-width: 100%; }
+.doc-x .doc { min-width: 0; }
+.doc .doc-t small { color: #5f6d79; font-size: 11px; }
+@media print { .doc-x { overflow: visible; } }

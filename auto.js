@@ -136,7 +136,9 @@ async function loadSettings() {
   catch (e) { console.warn('app_settings no disponible: ejecutar supabase/migracion-v3.sql', e); S.needsMigration = true; }
   S.needsV4 = !(r && r.data && num(r.data.schema_version) >= 4);
   S.needsV5 = !(r && r.data && num(r.data.schema_version) >= 5);
+  if (DEMO && r && r.data && num(r.data.schema_version) < 7) { r.data.schema_version = 7; await DB.update('app_settings', 1, { data: r.data }); }
   S.needsV6 = !(r && r.data && num(r.data.schema_version) >= 6);
+  S.needsV7 = !(r && r.data && num(r.data.schema_version) >= 7);
   S.settings = Object.assign({}, SETTINGS_DEF, r ? r.data || {} : {});
 }
 async function saveSettings(patch) {
@@ -556,10 +558,24 @@ function toggleOpt(f, arr, o) {
   if (ex.includes(o)) return [o];
   return arr.filter(x => !ex.includes(x)).concat(o);
 }
+/* Preguntas adicionales del entrenador (Ajustes): una por línea; «Pregunta | opción 1 / opción 2» para elegir una opción */
+function extraQuestionFields() {
+  return String(S.settings.extra_questions || '').split('\n').map(l => l.trim()).filter(Boolean).slice(0, 30).map((l, i) => {
+    const [q, o] = l.split('|').map(x => x.trim());
+    const opts = o ? o.split('/').map(x => x.trim()).filter(Boolean) : [];
+    return opts.length > 1 ? { id: 'x' + (i + 1), type: 'radio', label: q, opts } : { id: 'x' + (i + 1), type: 'textarea', label: q, small: 1 };
+  });
+}
+function intakeSteps() {
+  const xf = extraQuestionFields(); if (!xf.length) return INTAKE;
+  return INTAKE.slice(0, -1).concat({ t: 'Preguntas de tu entrenador', d: 'Preguntas adicionales para entender mejor tu situación y ajustar el plan a tu caso.', f: xf }, INTAKE.slice(-1));
+}
 function vOnboarding() {
   document.body.classList.add('onboarding');
+  const INTAKE = intakeSteps(); const xf = extraQuestionFields();
   let st = { step: 0, v: {}, missing: null };
   try { st = Object.assign(st, JSON.parse(localStorage.getItem(intakeDraftKey()) || '{}')); } catch (e) { }
+  st.step = Math.max(0, Math.min(num(st.step), INTAKE.length - 1));
   if (!st.v.nombre) st.v.nombre = S.profile.full_name || '';
   if (!st.v.whatsapp && S.profile.phone) st.v.whatsapp = S.profile.phone;
   const save = () => { try { localStorage.setItem(intakeDraftKey(), JSON.stringify({ step: st.step, v: st.v })); } catch (e) { } };
@@ -592,7 +608,7 @@ function vOnboarding() {
         },
         prev: () => { st.step--; st.missing = null; save(); draw(); window.scrollTo(0, 0); },
         next: () => { const bad = validate(); if (bad) { st.missing = bad.id; draw(); toast('Completa: ' + bad.label, 'error'); const el = document.querySelector(`[data-fid="${bad.id}"]`); if (el) el.scrollIntoView({ block: 'center' }); return; } st.step++; st.missing = null; save(); draw(); window.scrollTo(0, 0); },
-        submit: async el => { const bad = validate(); if (bad) { st.missing = bad.id; draw(); toast('Completa: ' + bad.label, 'error'); return; } el.disabled = true; el.textContent = 'Generando tu plan…'; await submitIntake(st.v); }
+        submit: async el => { const bad = validate(); if (bad) { st.missing = bad.id; draw(); toast('Completa: ' + bad.label, 'error'); return; } el.disabled = true; el.textContent = 'Generando tu plan…'; if (xf.length) st.v.extra = xf.map(f => ({ q: f.label, a: fmtAns(st.v[f.id] ?? '') })).filter(x => x.a); await submitIntake(st.v); }
       },
       input: t => { if (t.dataset.k && t.type !== 'checkbox') { st.v[t.dataset.k] = t.value; save(); } },
       change: t => { if (t.dataset.k && t.type === 'checkbox') { st.v[t.dataset.k] = t.checked ? 'Sí' : ''; save(); } }
@@ -636,7 +652,7 @@ function intakeAnswersHtml(d, cls = '') {
   return INTAKE.map(sec => {
     const rows = sec.f.filter(f => f.id && (!f.show || f.show(d)) && d[f.id] != null && fmtAns(d[f.id]) !== '').map(f => `<tr><td>${esc(f.label)}</td><td>${esc(fmtAns(d[f.id]))}${f.unit ? ' ' + f.unit : ''}</td></tr>`).join('');
     return rows ? `<h2>${esc(sec.t)}</h2><table class="doc-t ${cls}"><tbody>${rows}</tbody></table>` : '';
-  }).join('');
+  }).join('') + ((d.extra || []).length ? `<h2>Preguntas adicionales</h2><table class="doc-t ${cls}"><tbody>${d.extra.map(x => `<tr><td>${esc(x.q)}</td><td>${esc(x.a)}</td></tr>`).join('')}</tbody></table>` : '');
 }
 const dash = v => (v == null || v === '' || Number.isNaN(v)) ? '—' : v;
 function calcRows(c) {
@@ -748,7 +764,7 @@ async function coachValoracionTab(cid) {
   const client = (await DB.select('profiles', { eq: { id: cid } }))[0] || {};
   if (!it) return { html: '<div class="card empty"><p>Este asesorado aún no ha completado la valoración inicial.</p><p class="small muted">Se le solicita automáticamente al iniciar sesión si no tiene plan ni rutina asignados.</p></div>' };
   const c = it.calc || {};
-  const plans = await DB.select('nutrition_plans', { eq: { client_id: cid }, order: 'created_at', asc: false });
+  const plans = (await DB.select('nutrition_plans', { eq: { client_id: cid }, order: 'created_at', asc: false })).filter(p => !p.variant_of);
   const routines = await DB.select('routines', { eq: { client_id: cid }, order: 'created_at', asc: false });
   const pp = plans.find(p => p.review) || plans.find(p => p.active) || plans.find(p => p.id === c.plan_id);
   const rr = routines.find(r => r.review) || routines.find(r => r.active) || routines.find(r => r.id === c.routine_id);
@@ -871,6 +887,8 @@ async function recalcModal(cid, it) {
         show(); if (!preview) return toast('Indica el peso', 'error');
         const plan = await activePlanFor(cid); if (!plan) return toast('El asesorado no tiene un plan activo', 'error');
         el.disabled = true; el.textContent = 'Aplicando…';
+        // Tipos de día: los demás tipos se desplazan con la misma diferencia de energía que el tipo base
+        if (hasDayTypes(plan) && num(plan.kcal)) for (const v of plan.variants) await applyKcalDeltaTo(v, preview.kcal - num(plan.kcal));
         const fac = macroFactors(plan.meals, preview);
         for (const m of plan.meals) for (const o of m.options) for (const i of o.items) { const f = foodOf(i.food_id); if (!f) continue; const g = Math.max(1, roundG(num(i.grams) * fac[MACRO_GROUP(f.category)])); if (g !== num(i.grams)) await DB.update('plan_items', i.id, { grams: g }); }
         const patch = { kcal: preview.kcal, protein_g: preview.protein, carbs_g: preview.carbs, fat_g: preview.fat, water_ml: preview.water };
@@ -933,10 +951,12 @@ async function vCheckin() {
 }
 
 /* Análisis y sugerencia de ajuste */
-function dayCompletion(plan, dayLogs, daily) {
+function dayCompletion(plan, dayLogs, daily, date) {
   if (!plan) return null;
   const ch = (daily && daily.choices) || {}; let total = 0, done = 0;
-  plan.meals.forEach(me => { const o = me.options.find(x => x.id === ch[me.id]) || me.options[0]; if (!o) return; total += o.items.length; done += o.items.filter(i => dayLogs.some(l => l.plan_item_id === i.id)).length; });
+  date = date || (daily && daily.log_date) || (dayLogs[0] && dayLogs[0].log_date) || null;
+  if (date) plan = planForDate(plan, date, ch.__dtype);
+  plan.meals.forEach(me => { const o = chosenOption(me, ch, date); if (!o) return; total += o.items.length; done += o.items.filter(i => dayLogs.some(l => l.plan_item_id === i.id)).length; });
   return total ? Math.round(done / total * 100) : null;
 }
 function suggestAdjust(goal, ck, prev, adh) {
@@ -955,7 +975,10 @@ function suggestAdjust(goal, ck, prev, adh) {
   return { delta: 0, wk, text: `Progreso dentro del rango esperado (${r}). Se sugiere mantener el plan.` };
 }
 async function applyKcalDelta(cid, delta) {
-  const base = await activePlanFor(cid); if (!base) throw new Error('El asesorado no tiene un plan activo.');
+  const full = await activePlanFor(cid); if (!full) throw new Error('El asesorado no tiene un plan activo.');
+  for (const base of dayVariants(full)) await applyKcalDeltaTo(base, delta);   // con tipos de día, el ajuste se aplica a cada tipo
+}
+async function applyKcalDeltaTo(base, delta) {
   const t = targetsOf(base); const tot = planAvgTotals(base);
   const nt = { kcal: (t.kcal || tot.kcal) + delta, protein: t.protein || tot.protein, fat: t.fat || tot.fat, carbs: (t.carbs || tot.carbs) + delta / 4 };
   if (nt.carbs < 60) { nt.fat += (nt.carbs - 60) * 4 / 9; nt.carbs = 60; }
@@ -997,7 +1020,7 @@ async function coachCheckinsTab(cid) {
     const prevBody = bodies.filter(b => b.log_date < ck.check_date && num(b.weight_kg)).pop();
     const prev = prevCk ? { date: prevCk.check_date, weight_kg: prevCk.weight_kg } : prevBody ? { date: prevBody.log_date, weight_kg: prevBody.weight_kg } : null;
     const days = Array.from({ length: 7 }, (_, k) => addDays(ck.check_date, -7 + k));
-    const comps = days.map(dd => dayCompletion(plan, logs.filter(l => l.log_date === dd), dailies.find(x => x.log_date === dd))).filter(x => x != null);
+    const comps = days.map(dd => dayCompletion(plan, logs.filter(l => l.log_date === dd), dailies.find(x => x.log_date === dd), dd)).filter(x => x != null);
     const logged = days.filter(dd => logs.some(l => l.log_date === dd)).length;
     const adh = comps.length && plan ? Math.round(comps.reduce((a, b) => a + b, 0) / comps.length) : null;
     const sess = ws.filter(w => { const d = dateStr(new Date(w.started_at)); return d >= days[0] && d < ck.check_date; }).length;
@@ -1082,6 +1105,7 @@ async function inboxInner(clients) {
   if (typeof inboxTenisRows === 'function') rows.push(...await inboxTenisRows(byId));
   if (typeof inboxMessageRows === 'function') rows.push(...await inboxMessageRows(byId));
   if (typeof inboxLeadRows === 'function') rows.push(...await inboxLeadRows());
+  if (typeof inboxCaseRows === 'function') rows.push(...await inboxCaseRows(byId));
   intakes.filter(i => byId[i.client_id]).forEach(i => rows.push(`<a class="ib-row" href="#/asesorado/${i.client_id}/valoracion"><span class="ib-tag v">Valoración</span><span class="ib-n">${esc(byId[i.client_id].full_name || byId[i.client_id].email)}</span><span class="ib-m">${(i.flags || []).filter(f => f.level !== 'info').length ? `<span class="warn">${(i.flags || []).filter(f => f.level !== 'info').length} alertas</span>` : 'Sin alertas'}</span></a>`));
   cks.filter(c => byId[c.client_id]).forEach(c => rows.push(`<a class="ib-row" href="#/asesorado/${c.client_id}/checkins"><span class="ib-tag c">Check-in</span><span class="ib-n">${esc(byId[c.client_id].full_name || '')}</span><span class="ib-m">${fmtDM(parseDay(c.check_date))}</span></a>`));
   inactive.forEach(c => rows.push(`<div class="ib-row"><span class="ib-tag i">Inactivo</span><a class="ib-n" href="#/asesorado/${c.id}/seguimiento">${esc(c.full_name || c.email)}</a><span class="ib-m">${lastAct[c.id] ? daysBetween(lastAct[c.id], todayStr()) + ' días' : 'sin registros'} ${waBtn(c.phone, `Hola ${firstName(c.full_name)}, ¿cómo vas con tu plan esta semana? Recuerda registrar tus comidas y entrenamientos en Deuce Point.`, 'WhatsApp', 'chip wa')}</span></div>`));
@@ -1094,7 +1118,7 @@ async function inboxInner(clients) {
    ===================================================================== */
 async function vAjustes() {
   const s = S.settings;
-  const tpls = await DB.select('nutrition_plans', { eq: { is_template: true }, order: 'name' });
+  const tpls = (await DB.select('nutrition_plans', { eq: { is_template: true }, order: 'name' })).filter(p => !p.variant_of);
   const sel = k => `<select class="input" data-s="${k}"><option value="">${k === 'tpl_default' ? 'Plan base del sistema (5 comidas)' : 'Igual que la plantilla general'}</option>${tpls.map(p => `<option value="${p.id}"${s[k] === p.id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select>`;
   const n = (k, l) => `<label><span>${l}</span><input class="input" data-s="${k}" data-num="1" inputmode="decimal" value="${esc(s[k] ?? '')}"></label>`;
   paint(`<a class="linkbtn" href="#/asesorados">← Asesorados</a>
@@ -1144,6 +1168,9 @@ async function vAjustes() {
       <label class="field"><span>Servicios: uno por línea con el formato Nombre | Precio | Descripción</span><textarea class="input" rows="4" data-s="landing_services" placeholder="Nutrición | $150.000 / mes | Plan de alimentación y seguimiento semanal">${esc(s.landing_services || '')}</textarea></label>
       <p class="small muted">Enlace y código QR en Negocio › Página y QR.</p></div>
     ${typeof vapidCardHtml === 'function' ? await vapidCardHtml() : ''}
+    <div class="card"><h3>Preguntas adicionales de la valoración inicial</h3>
+      <label class="field"><span>Una pregunta por línea. Para preguntas de opción: Pregunta | opción 1 / opción 2 / opción 3</span><textarea class="input" rows="5" data-s="extra_questions" placeholder="¿A qué hora empieza tu entrenamiento principal?\n¿Usas anticoncepción hormonal? | Sí / No / Prefiero no responder\n¿Cuánto tiempo tienes para cocinar al día? | Menos de 30 min / 30 a 60 min / Más de 60 min">${esc(s.extra_questions || '')}</textarea></label>
+      <p class="small muted">Se agregan como un paso adicional antes de las autorizaciones. Las respuestas aparecen en la valoración y en el paquete de análisis para tu IA. A los asesorados actuales puedes enviarles preguntas desde su expediente.</p></div>
     <div class="card"><h3>Respuestas guardadas para mensajes</h3><label class="field"><span>Una respuesta por línea</span><textarea class="input" rows="4" data-s="quick_replies">${esc(s.quick_replies || '')}</textarea></label></div>
     <div class="card"><h3>Contacto</h3><label class="field"><span>Tu número de WhatsApp</span><input class="input" data-s="whatsapp" inputmode="tel" value="${esc(s.whatsapp || '')}" placeholder="3001234567"></label><p class="small muted">Se muestra a los asesorados para escribirte directamente.</p></div>
     ${typeof coachKeyCardHtml === 'function' ? await coachKeyCardHtml() : ''}`, {
@@ -1188,7 +1215,7 @@ function buildAutoDemo(d) {
   const ana = d.profiles.find(p => p.id === 'demo-ana'), juan = d.profiles.find(p => p.id === 'demo-juan');
   if (ana) ana.phone = '3001112233'; if (juan) juan.phone = '3004445566';
   const tpl = d.nutrition_plans.find(p => p.is_template);
-  d.app_settings.push({ id: 1, data: Object.assign({}, SETTINGS_DEF, { whatsapp: '3009998877', tpl_default: tpl ? tpl.id : '', schema_version: 6 }), updated_at: iso });
+  d.app_settings.push({ id: 1, data: Object.assign({}, SETTINGS_DEF, { whatsapp: '3009998877', tpl_default: tpl ? tpl.id : '', schema_version: 7 }), updated_at: iso });
   d.memberships.push({ id: uid(), client_id: 'demo-juan', plan_name: 'Mensual', start_date: addDays(today, -27), end_date: addDays(today, 3), amount: 180000, notes: 'Pago por transferencia', archived: false, updated_at: iso },
     { id: uid(), client_id: 'demo-ana', plan_name: 'Trimestral', start_date: addDays(today, -42), end_date: addDays(today, 48), amount: null, notes: null, archived: false, updated_at: iso });
   const base = { ciudad: 'Bogotá', trabajo: 'Sentado la mayor parte del día', pq1: 'No', pq2: 'No', pq3: 'No', pq4: 'No', pq5: 'No', pq6: 'No', pq7: 'No', enfermedades: ['Ninguna'], sc1: 'No', sc2: 'No', sc3: 'No', sc4: 'No', sc5: 'No', restricciones: ['Ninguna'], sueno: '7 a 8', lugar: 'Gimnasio', minutos: '60 min', consentimiento: 'Sí', datos: 'Sí', importancia: '9' };

@@ -46,13 +46,26 @@ Deno.serve(async () => {
     if (p.meals) {
       const due = Object.entries(p.meals as Record<string, any>).filter(([, v]) => v && v.on && isDue(now, toMin(v.time)));
       if (due.length) {
-        const { data: plan } = await sb.from('nutrition_plans').select('id').eq('client_id', r.user_id).eq('active', true).order('created_at', { ascending: false }).limit(1).maybeSingle();
+        const { data: root } = await sb.from('nutrition_plans').select('*').eq('client_id', r.user_id).eq('active', true).order('created_at', { ascending: false }).limit(1).maybeSingle();
+        // Tipo de día de la fecha (v7): elección del asesorado > fecha especial > día de la semana > tipo base
+        let plan: any = root;
+        if (root && 'day_overrides' in root) {
+          const { data: vars } = await sb.from('nutrition_plans').select('id,day_code,weekdays').eq('variant_of', root.id);
+          if (vars && vars.length) {
+            const all = [root, ...vars];
+            const { data: dl } = await sb.from('daily_logs').select('choices').eq('client_id', r.user_id).eq('log_date', now.date).maybeSingle();
+            const pickId = dl && dl.choices && dl.choices.__dtype; const ov = (root.day_overrides || {})[now.date]; const code = ov && (typeof ov === 'string' ? ov : ov.c);
+            plan = all.find(v => v.id === pickId) || (code && all.find(v => v.day_code === code)) || all.find(v => (v.weekdays || []).includes(now.weekday)) || root;
+          }
+        }
         for (const [name] of due) {
           let body = 'Revisa tu menú en la app y marca lo que consumas.';
           if (plan) {
             const { data: meal } = await sb.from('plan_meals').select('id').eq('plan_id', plan.id).eq('name', name).limit(1).maybeSingle();
             if (meal) {
-              const { data: opts } = await sb.from('plan_options').select('id,name').eq('meal_id', meal.id).order('position');
+              const { data: all } = await sb.from('plan_options').select('*').eq('meal_id', meal.id).order('position');
+              const rot = (all || []).find((o: any) => (o.weekdays || []).includes(now.weekday));
+              const opts = rot ? [rot] : (all || []).filter((o: any) => !(o.weekdays || []).length);
               const ids = (opts || []).map(o => o.id);
               const { data: items } = ids.length ? await sb.from('plan_items').select('option_id,grams,foods(name)').in('option_id', ids).order('position') : { data: [] };
               const txt = (opts || []).slice(0, 3).map(o => `${o.name}: ${(items || []).filter((i: any) => i.option_id === o.id).map((i: any) => `${i.foods?.name ?? ''} ${Math.round(i.grams)} g`).join(', ')}`).join(' · ');

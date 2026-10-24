@@ -101,7 +101,48 @@ async function loadPlanFull(id) {
   const items = await DB.select('plan_items', { inn: { option_id: opts.map(o => o.id) }, order: 'position' });
   meals.forEach(m => { m.options = opts.filter(o => o.meal_id === m.id); m.options.forEach(o => { o.items = items.filter(i => i.option_id === o.id); }); });
   plan.meals = meals;
+  plan.variants = [];
+  if (!S.needsV7 && !plan.variant_of) {
+    const vs = await DB.select('nutrition_plans', { eq: { variant_of: id } }).catch(() => []);
+    plan.variants = (await Promise.all(vs.map(v => loadPlanFull(v.id)))).filter(Boolean);
+  }
   return plan;
+}
+/* ---------- tipos de día: cada tipo es un plan hijo (variant_of) con metas y comidas propias ---------- */
+const codeCmp = (a, b) => String(a.day_code || '').localeCompare(String(b.day_code || ''), 'es');
+const hasDayTypes = p => !!(p && p.variants && p.variants.length);
+const dayVariants = p => !p ? [] : hasDayTypes(p) ? [p].concat(p.variants).sort(codeCmp) : [p];
+const dayLabel = p => p.day_code || p.day_name ? [p.day_code ? 'Día ' + p.day_code : '', p.day_name].filter(Boolean).join(' · ') : 'Día base';
+function dayOverride(p, date) { const o = ((p && p.day_overrides) || {})[date]; if (!o) return null; return typeof o === 'string' ? { c: o } : o; }
+/* Fechas especiales agrupadas en periodos consecutivos con la misma indicación */
+function ovRanges(p) {
+  const out = [];
+  for (const [d, o0] of Object.entries((p && p.day_overrides) || {}).sort((a, b) => a[0] < b[0] ? -1 : 1)) {
+    const o = typeof o0 === 'string' ? { c: o0 } : o0; const last = out[out.length - 1];
+    if (last && addDays(last.to, 1) === d && JSON.stringify(last.o) === JSON.stringify(o)) { last.to = d; last.dates.push(d); } else out.push({ from: d, to: d, o, dates: [d] });
+  }
+  return out;
+}
+const rangeLbl = r => r.from === r.to ? fmtDM(parseDay(r.from)) : `${fmtDM(parseDay(r.from))} a ${fmtDM(parseDay(r.to))}`;
+const ovText = o => [o.n, num(o.f) && num(o.f) !== 1 ? Math.round(num(o.f) * 100) + ' % de las porciones de carbohidratos' : ''].filter(Boolean).join(' · ');
+/* Tipo de día que corresponde a una fecha: elección del día > fecha especial > día de la semana > tipo base */
+function planForDate(p, date, pick) {
+  if (!hasDayTypes(p)) return p;
+  const all = dayVariants(p);
+  if (pick) { const x = all.find(v => v.id === pick); if (x) return x; }
+  const ov = dayOverride(p, date); if (ov && ov.c) { const x = all.find(v => v.day_code === ov.c); if (x) return x; }
+  const dn = WEEKDAYS[parseDay(date).getDay()];
+  return all.find(v => (v.weekdays || []).includes(dn)) || p;
+}
+/* Opción por defecto de una comida: la asignada al día de la semana (rotaciones) o la primera */
+function defaultOption(m, date) {
+  const dn = date ? WEEKDAYS[parseDay(date).getDay()] : '';
+  return (dn && m.options.find(o => (o.weekdays || []).includes(dn))) || m.options[0];
+}
+const chosenOption = (m, ch, date) => m.options.find(o => o.id === (ch || {})[m.id]) || defaultOption(m, date);
+/* Días de cada tipo en un rango de fechas (para compras y documentos) */
+function dayTypeCounts(p, start, n) {
+  const c = {}; for (let i = 0; i < n; i++) { const v = planForDate(p, addDays(start, i)); c[v.id] = (c[v.id] || 0) + 1; } return c;
 }
 const optionTotals = o => o.items.reduce((a, i) => { const f = foodOf(i.food_id); return f ? addM(a, macrosFor(f, i.grams)) : a; }, ZERO());
 function mealAvg(m) { const os = m.options.filter(o => o.items.length); if (!os.length) return ZERO(); return scaleM(os.reduce((a, o) => addM(a, optionTotals(o)), ZERO()), 1 / os.length); }
@@ -116,14 +157,16 @@ function restFactor(p) {
   if (!cg) return 1;
   return Math.min(1, Math.max(0.2, (cg - (num(p.carbs_g) - num(p.rest_carbs_g))) / cg));
 }
+/* Carbohidratos (g) del grupo de cereales, tubérculos y frutas en un día promedio del plan */
+function carbGroupG(p) { return p.meals.reduce((a, m) => { const os = m.options.filter(o => o.items.length); return a + (os.length ? os.reduce((b, o) => b + o.items.reduce((c, i) => { const f = foodOf(i.food_id); return isCarbFood(f) ? c + macrosFor(f, i.grams).carbs : c; }, 0), 0) / os.length : 0); }, 0); }
 const restTargets = (p, t) => ({ kcal: t.kcal - (t.carbs - num(p.rest_carbs_g)) * 4, protein: t.protein, carbs: num(p.rest_carbs_g), fat: t.fat });
 async function activePlanFor(cid) {
-  const ps = await DB.select('nutrition_plans', { eq: { client_id: cid, active: true }, order: 'created_at', asc: false, limit: 1 });
+  const ps = (await DB.select('nutrition_plans', { eq: { client_id: cid, active: true }, order: 'created_at', asc: false, limit: 5 })).filter(p => !p.variant_of);
   return ps[0] ? loadPlanFull(ps[0].id) : null;
 }
 async function deactivatePlans(cid, exceptId) {
   const ps = await DB.select('nutrition_plans', { eq: { client_id: cid, active: true } });
-  for (const p of ps) if (p.id !== exceptId) await DB.update('nutrition_plans', p.id, { active: false });
+  for (const p of ps) if (p.id !== exceptId && !p.variant_of) await DB.update('nutrition_plans', p.id, { active: false });
 }
 async function createBlankPlan({ clientId = null, isTemplate = false, name }) {
   if (clientId) await deactivatePlans(clientId);
@@ -140,14 +183,20 @@ async function copyPlan(planId, o) {
   const f = (num(o.kcal) && num(p.kcal)) ? num(o.kcal) / num(p.kcal) : 1;
   const sc = v => (v == null || v === '') ? null : Math.round(num(v) * f);
   if (o.clientId) await deactivatePlans(o.clientId);
-  const [np] = await DB.insert('nutrition_plans', { client_id: o.clientId || null, is_template: !o.clientId, name: o.name || (o.clientId ? p.name.replace(/^Plantilla\s*·\s*/, '') : p.name), kcal: sc(p.kcal), protein_g: sc(p.protein_g), carbs_g: sc(p.carbs_g), fat_g: sc(p.fat_g), water_ml: p.water_ml, notes: p.notes, active: !!o.clientId, ...(p.rest_carbs_g != null ? { rest_carbs_g: sc(p.rest_carbs_g), train_days: p.train_days, peri_meals: p.peri_meals } : {}) });
-  for (const m of p.meals) {
-    const [nm] = await DB.insert('plan_meals', { plan_id: np.id, name: m.name, time_label: m.time_label, instructions: m.instructions, position: m.position });
-    for (const op of m.options) {
-      const [no] = await DB.insert('plan_options', { meal_id: nm.id, name: op.name, position: op.position });
-      await DB.insert('plan_items', op.items.map(i => ({ option_id: no.id, food_id: i.food_id, grams: Math.max(1, roundG(num(i.grams) * f)), position: i.position, note: i.note })));
+  const one = async (src, extra) => {
+    const dt = S.needsV7 ? {} : { day_code: src.day_code || null, day_name: src.day_name || null, weekdays: src.weekdays || [], day_notes: src.day_notes || null };
+    const [np] = await DB.insert('nutrition_plans', Object.assign({ client_id: o.clientId || null, is_template: !o.clientId, name: o.name || (o.clientId ? src.name.replace(/^Plantilla\s*·\s*/, '') : src.name), kcal: sc(src.kcal), protein_g: sc(src.protein_g), carbs_g: sc(src.carbs_g), fat_g: sc(src.fat_g), water_ml: src.water_ml, notes: src.notes, ...(src.rest_carbs_g != null ? { rest_carbs_g: sc(src.rest_carbs_g), train_days: src.train_days, peri_meals: src.peri_meals } : {}) }, dt, extra));
+    for (const m of src.meals) {
+      const [nm] = await DB.insert('plan_meals', { plan_id: np.id, name: m.name, time_label: m.time_label, instructions: m.instructions, position: m.position });
+      for (const op of m.options) {
+        const [no] = await DB.insert('plan_options', Object.assign({ meal_id: nm.id, name: op.name, position: op.position }, op.recipe ? { recipe: op.recipe } : {}, !S.needsV7 && (op.weekdays || []).length ? { weekdays: op.weekdays } : {}));
+        await DB.insert('plan_items', op.items.map(i => ({ option_id: no.id, food_id: i.food_id, grams: Math.max(1, roundG(num(i.grams) * f)), position: i.position, note: i.note })));
+      }
     }
-  }
+    return np;
+  };
+  const np = await one(p, Object.assign({ active: !!o.clientId }, !S.needsV7 && p.day_overrides ? { day_overrides: p.day_overrides } : {}));
+  for (const v of p.variants || []) await one(v, { active: false, variant_of: np.id, name: np.name });
   return np.id;
 }
 
@@ -295,17 +344,21 @@ async function vHoy(date, cid) {
   const own = cid === S.profile.id;
   const base = own ? '#/hoy/' : `#/diario/${cid}/`;
   const client = own ? S.profile : (await DB.select('profiles', { eq: { id: cid } }))[0] || {};
-  const [plan, logs, daily] = await Promise.all([
+  const [full, logs, daily] = await Promise.all([
     activePlanFor(cid),
     DB.select('food_logs', { eq: { client_id: cid, log_date: date }, order: 'created_at' }),
     DB.select('daily_logs', { eq: { client_id: cid, log_date: date } }).then(r => r[0] || null)]);
   const isToday = date === todayStr();
+  const choices = (daily && daily.choices) || {};
+  // Tipos de día definidos por el entrenador (A, B, C…): metas y comidas propias por día
+  const multi = hasDayTypes(full); const ov = multi ? dayOverride(full, date) : null;
+  const plan = planForDate(full, date, choices.__dtype);
   let t = targetsOf(plan); const hasT = t && t.kcal > 0;
   const tot = logs.reduce((a, l) => addM(a, logM(l)), ZERO());
-  const choices = (daily && daily.choices) || {};
   // Tipo de día (ciclado de carbohidratos)
   let dayType = null, rf = 1;
-  const tday = plan && hasT && typeof tournamentDay === 'function' ? await tournamentDay(cid, date, plan).catch(() => null) : null;
+  const tdayInfo = plan && hasT && typeof tournamentDay === 'function' ? await tournamentDay(cid, date, plan).catch(() => null) : null;
+  const tday = multi ? null : tdayInfo;   // con tipos de día, la fecha de competencia se define en el plan
   const dayOpts = [['train', 'Día de entreno']].concat(cycles(plan) ? [['rest', 'Día de descanso']] : [], tday ? [[tday.type, tday.label]] : []);
   if (cycles(plan) || tday) {
     const ws = await DB.select('workouts', { eq: { client_id: cid }, gte: { started_at: parseDay(addDays(date, -1)).toISOString() }, limit: 20 });
@@ -315,9 +368,12 @@ async function vHoy(date, cid) {
     if (dayType === 'rest') { t = restTargets(plan, t); rf = restFactor(plan); }
     else if (tday && dayType === tday.type) { t = Object.assign({}, t, { carbs: tday.carbs, kcal: t.kcal + (tday.carbs - t.carbs) * 4 }); rf = carbFactor(plan, tday.carbs); }
   }
+  // Progresión por fechas: porcentaje de las porciones del grupo de carbohidratos
+  const pf = ov && num(ov.f) > 0 && num(ov.f) !== 1 ? num(ov.f) : 1;
+  if (pf !== 1 && plan) { const cg = carbGroupG(plan) * rf; rf *= pf; if (hasT) t = Object.assign({}, t, { carbs: Math.round(t.carbs - cg * (1 - pf)), kcal: Math.round(t.kcal - cg * (1 - pf) * 4) }); }
   // Partidos y práctica de tenis: gasto adicional del día
   const tk = hasT && typeof tennisKcal === 'function' ? await tennisKcal(cid, date) : { kcal: 0, rows: [] };
-  if (tday && dayType === tday.type) tk.kcal = 0;   // en días de torneo la meta de carbohidratos en g/kg ya cubre el gasto del partido
+  if ((tday && dayType === tday.type) || multi) tk.kcal = 0;   // en días de torneo la meta en g/kg ya cubre el partido; con tipos de día, el tipo ya incluye el gasto de la sesión
   if (tk.kcal) t = Object.assign({}, t, { kcal: t.kcal + tk.kcal, carbs: t.carbs + Math.round(tk.kcal * 0.7 / 4), fat: t.fat + Math.round(tk.kcal * 0.3 / 9) });
   const peri = dayType === 'train' && plan && plan.peri_meals ? plan.peri_meals : null;
   const water = num(daily && daily.water_ml), waterT = num(plan && plan.water_ml) || 2500;
@@ -331,7 +387,16 @@ async function vHoy(date, cid) {
   if (dayType) html += `<div class="seg daytype">${dayOpts.map(([k, l]) => `<button class="${dayType === k ? 'on' : ''}" data-act="dayT" data-v="${k}">${l}</button>`).join('')}</div>
     ${dayType === 'rest' ? `<p class="small muted">Día de descanso: ${fmtInt(num(plan.carbs_g) - num(plan.rest_carbs_g))} g menos de carbohidratos; las porciones del grupo de cereales, tubérculos y frutas ya están ajustadas.</p>` : ''}
     ${tday && dayType === tday.type ? `<p class="small muted">${esc(tday.t.name)}: carbohidratos ${fmtInt(tday.carbs)} g (${fmtN(tday.gkg)} g/kg); las porciones de cereales, tubérculos y frutas ya están aumentadas. <a href="${own ? '#/rendimiento/torneos' : `#/asesorado/${cid}/rendimiento/torneos`}">Protocolo del día de partido</a></p>` : ''}`;
-  if (tk.rows.length) html += `<p class="small muted">Tenis hoy: ${tk.rows.map(r => `${r.kind.toLowerCase()} de ${r.minutes} min`).join(', ')} · gasto estimado ${fmtInt(tk.gross)} kcal${tk.kcal ? ` · +${fmtInt(tk.kcal)} kcal sumadas al objetivo (70 % carbohidratos, 30 % grasa)${tk.assumed ? `; el plan ya incluye ${String(tk.assumed).replace('.', ',')} sesiones por semana` : ''}` : tday && dayType === tday.type ? ' · cubierto por la meta de carbohidratos del día de torneo' : ''}.</p>`;
+  if (multi) {
+    const dn = WEEKDAYS[parseDay(date).getDay()];
+    const why = choices.__dtype && choices.__dtype === plan.id ? 'Elegido para este día' : ov && ov.c && ov.c === plan.day_code ? 'Fecha especial' + (ov.n ? ': ' + ov.n : '') : (plan.weekdays || []).includes(dn) ? `Asignado a los ${dn.toLowerCase()}` : 'Tipo de día base del plan';
+    html += `<div class="chips daytypes">${dayVariants(full).map(v => `<button class="chip${v.id === plan.id ? ' on' : ''}" data-act="dtype" data-v="${v.id}">${esc(dayLabel(v))}</button>`).join('')}</div>
+      <p class="small muted">${esc(why)} · ${fmtInt(num(plan.kcal))} kcal, P ${fmtInt(num(plan.protein_g))} g, C ${fmtInt(num(plan.carbs_g))} g, G ${fmtInt(num(plan.fat_g))} g.${choices.__dtype ? ' <button class="linkbtn" data-act="dtype" data-v="">Usar la asignación del plan</button>' : ''}</p>
+      ${plan.day_notes ? `<p class="note">${esc(plan.day_notes)}</p>` : ''}
+      ${pf !== 1 ? `<p class="small muted">${ov.n ? esc(ov.n) + '. ' : ''}Porciones de cereales, tubérculos y frutas al ${Math.round(pf * 100)} %; ya están ajustadas.</p>` : ''}
+      ${tdayInfo ? `<p class="small muted">${esc(tdayInfo.t.name)}: ${tdayInfo.type === 'match' ? 'día de competencia' : 'víspera de la competencia'}. <a href="${own ? '#/rendimiento/torneos' : `#/asesorado/${cid}/rendimiento/torneos`}">Protocolo del día</a></p>` : ''}`;
+  }
+  if (tk.rows.length) html += `<p class="small muted">Tenis hoy: ${tk.rows.map(r => `${r.kind.toLowerCase()} de ${r.minutes} min`).join(', ')} · gasto estimado ${fmtInt(tk.gross)} kcal${tk.kcal ? ` · +${fmtInt(tk.kcal)} kcal sumadas al objetivo (70 % carbohidratos, 30 % grasa)${tk.assumed ? `; el plan ya incluye ${String(tk.assumed).replace('.', ',')} sesiones por semana` : ''}` : tday && dayType === tday.type ? ' · cubierto por la meta de carbohidratos del día de torneo' : multi ? ' · incluido en las metas del tipo de día' : ''}.</p>`;
   if (own && isToday && S.profile.goal) html += `<div class="goal"><small>Objetivo</small>${esc(S.profile.goal)}</div>`;
   if (nut) html += `<div class="card sum">
     <div class="sum-top"><div><b>${fmtInt(tot.kcal)}</b><small>Consumidas</small></div>
@@ -349,6 +414,7 @@ async function vHoy(date, cid) {
   if (own && isToday && typeof supplementCardHtml === 'function') html += await supplementCardHtml().catch(() => '');
   if (own && isToday && (typeof showsTraining !== 'function' || showsTraining())) html += await workoutCardHtml(cid);
   if (own && isToday && typeof surveyCardHtml === 'function') html += await surveyCardHtml().catch(() => '');
+  if (own && isToday && typeof caseCardHtml === 'function') html += await caseCardHtml().catch(() => '');
   if (own && isToday && typeof checkinCardsHtml === 'function' && !S.needsMigration) html += await checkinCardsHtml(cid).catch(() => '');
   if (own && isToday && typeof clientMembershipCard === 'function') html += (await clientMembershipCard()) + (await clientReportCard());
 
@@ -377,7 +443,7 @@ async function vHoy(date, cid) {
     const mk = m.id || 'n' + mi; mealByKey[mk] = m;
     const mlogs = logs.filter(l => m.id ? l.meal_id === m.id : (!l.meal_id && l.meal_name === m.name));
     mlogs.forEach(l => used.add(l.id));
-    const opt = m.options.find(o => o.id === choices[m.id]) || m.options[0];
+    const opt = chosenOption(m, choices, date);
     const ids = new Set(opt ? opt.items.map(i => i.id) : []);
     const extras = mlogs.filter(l => !ids.has(l.plan_item_id));
     const mt = mlogs.reduce((a, l) => addM(a, logM(l)), ZERO());
@@ -395,7 +461,7 @@ async function vHoy(date, cid) {
   }).join('');
   const orphans = logs.filter(l => !used.has(l.id));
   if (nut && orphans.length) html += `<div class="card meal"><div class="meal-h"><h3>Otros registros</h3></div>${orphans.map(logRow).join('')}</div>`;
-  if (nut && plan) html += `<div class="row-btns"><a class="btn" href="#/plan-ver/${plan.id}">Ver plan completo</a><a class="btn" href="#/compras/${plan.id}">Lista de compras</a>${own && typeof vFuera === 'function' ? '<a class="btn" href="#/fuera">Comer fuera de casa</a>' : ''}</div>`;
+  if (nut && plan) html += `<div class="row-btns"><a class="btn" href="#/plan-ver/${full.id}">Ver plan completo</a><a class="btn" href="#/compras/${full.id}">Lista de compras</a>${own && typeof vFuera === 'function' ? '<a class="btn" href="#/fuera">Comer fuera de casa</a>' : ''}</div>`;
 
   paint(html, {
     change: async t => { if ('steps' in t.dataset) { await upsertDaily(cid, date, { steps: Math.max(0, Math.round(num(t.value))) }); toast('Pasos guardados'); } },
@@ -405,7 +471,8 @@ async function vHoy(date, cid) {
       ...(typeof supplementHandlers === 'function' ? supplementHandlers(rerender) : {}),
       ...(typeof cycleHandlers === 'function' ? cycleHandlers(rerender) : {}),
       ...(typeof challengeHandlers === 'function' ? challengeHandlers(rerender) : {}),
-      recipe: el => { const m = mealByKey[el.dataset.meal]; const o = m.options.find(x => x.id === choices[m.id]) || m.options[0]; if (o) recipeModal(o, rf); },
+      recipe: el => { const m = mealByKey[el.dataset.meal]; const o = chosenOption(m, choices, date); if (o) recipeModal(o, rf); },
+      dtype: async el => { const c = Object.assign({}, choices); if (el.dataset.v) c.__dtype = el.dataset.v; else delete c.__dtype; await upsertDaily(cid, date, { choices: c }); rerender(); },
       dayT: async el => { await upsertDaily(cid, date, { choices: Object.assign({}, choices, { __day: el.dataset.v }) }); rerender(); },
       startWk: el => startWorkout(el.dataset.id),
       opt: async el => { await upsertDaily(cid, date, { choices: Object.assign({}, choices, { [el.dataset.meal]: el.dataset.opt }) }); rerender(); },
@@ -448,11 +515,70 @@ const DOC_CSS = `
 .doc-t.targets td{font-size:14px;font-weight:600}
 .doc-repl{font-size:12px;color:#36485a;margin:2px 0 10px;padding-left:16px}
 .doc-repl li{margin:2px 0}
+.doc h2.doc-day{font-size:19px;background:#0B406C;color:#fff;padding:7px 10px;border-radius:6px;border:0;margin-top:28px}
+.doc h3.doc-meal{font-size:15px;color:#0B406C;margin:16px 0 4px;padding-bottom:3px;border-bottom:1px solid #dce2d8}
+.doc .doc-opt{margin:8px 0 2px;font-size:13px}
 .doc-foot{margin-top:18px;font-size:11px;color:#5f6d79;border-top:1px solid #dce2d8;padding-top:8px}
-@media print{.doc{padding:0;border-radius:0}.doc h2{break-after:avoid}.doc-t{break-inside:auto}.doc-t tr{break-inside:avoid}}`;
+@media print{.doc{padding:0;border-radius:0}.doc h2,.doc h3{break-after:avoid}.doc h2.doc-day{break-before:page;-webkit-print-color-adjust:exact;print-color-adjust:exact}.doc-t{break-inside:auto}.doc-t tr{break-inside:avoid}}`;
 function ensureDocCss() { if (!document.getElementById('doc-css')) { const s = document.createElement('style'); s.id = 'doc-css'; s.textContent = DOC_CSS; document.head.appendChild(s); } }
 
+/* Comidas de un plan (o de un tipo de día) para el documento */
+function mealsDocHtml(plan, cyc, rfd, sub) {
+  let h = '';
+  for (const m of plan.meals) {
+    h += sub ? `<h3 class="doc-meal">${esc(m.name)}${m.time_label ? ' · ' + esc(m.time_label) : ''}</h3>` : `<h2>${esc(m.name)}${m.time_label ? ' · ' + esc(m.time_label) : ''}</h2>`;
+    if (m.instructions) h += `<p class="pre">${esc(m.instructions)}</p>`;
+    const os = m.options.filter(x => x.items.length);
+    for (const o of os) {
+      const ot = optionTotals(o);
+      if (os.length > 1) h += sub ? `<p class="doc-opt"><b>${esc(o.name)}</b>${(o.weekdays || []).length ? ' · ' + esc(o.weekdays.join(', ')) : ''}</p>` : `<h3>${esc(o.name)}${(o.weekdays || []).length ? ' · ' + esc(o.weekdays.join(', ')) : ''}</h3>`;
+      h += `<table class="doc-t"><thead><tr><th>Alimento</th><th class="n">${cyc ? 'Entreno' : 'Gramos'}</th>${cyc ? '<th class="n">Descanso</th>' : ''}<th>Medida casera</th><th class="n">kcal</th><th class="n">P</th><th class="n">C</th><th class="n">G</th></tr></thead><tbody>`;
+      const repl = [];
+      for (const i of o.items) {
+        const f = foodOf(i.food_id); if (!f) continue; const mm = macrosFor(f, i.grams);
+        h += `<tr><td>${esc(f.name)}${i.note ? `<br><small>${esc(i.note)}</small>` : ''}</td><td class="n">${fmtN(i.grams)} g</td>${cyc ? `<td class="n">${isCarbFood(f) ? fmtN(Math.max(1, roundG(num(i.grams) * rfd))) + ' g' : '='}</td>` : ''}<td>${esc(unitText(f, i.grams).replace('≈ ', ''))}</td><td class="n">${fmtInt(mm.kcal)}</td><td class="n">${fmtN(mm.protein)}</td><td class="n">${fmtN(mm.carbs)}</td><td class="n">${fmtN(mm.fat)}</td></tr>`;
+        const eq = equivalents(f, num(i.grams), 3);
+        if (eq.length) repl.push(`<li><b>${esc(f.name)} ${fmtN(i.grams)} g:</b> ${eq.map(e => `${esc(e.food.name)} ${fmtN(e.grams)} g`).join(' · ')}</li>`);
+      }
+      h += `</tbody><tfoot><tr><td>Total</td><td></td>${cyc ? '<td></td>' : ''}<td></td><td class="n">${fmtInt(ot.kcal)}</td><td class="n">${fmtN(ot.protein)}</td><td class="n">${fmtN(ot.carbs)}</td><td class="n">${fmtN(ot.fat)}</td></tr></tfoot></table>`;
+      if (repl.length) h += `<p class="small"><b>Opciones de reemplazo</b></p><ul class="doc-repl">${repl.join('')}</ul>`;
+      if (typeof recipeDocHtml === 'function') h += recipeDocHtml(o);
+    }
+  }
+  return h;
+}
+const targetsRow = p => { const t = targetsOf(p); const pct = (g, k) => t.kcal ? Math.round(g * k / t.kcal * 100) + ' %' : ''; return `<td>${t.kcal ? fmtInt(t.kcal) + ' kcal' : '—'}</td><td>${t.protein ? fmtInt(t.protein) + ' g · ' + pct(t.protein, 4) : '—'}</td><td>${t.carbs ? fmtInt(t.carbs) + ' g · ' + pct(t.carbs, 4) : '—'}</td><td>${t.fat ? fmtInt(t.fat) + ' g · ' + pct(t.fat, 9) : '—'}</td><td>${p.water_ml ? (p.water_ml / 1000).toLocaleString('es-CO') + ' L' : '—'}</td>`; };
+/* Documento de un plan con tipos de día */
+function multiDocHtml(plan, client, logoSrc) {
+  const all = dayVariants(plan);
+  const w = client && num(client.weight_kg) ? num(client.weight_kg) : 0;
+  let h = `<div class="doc-h">${logoSrc ? `<img class="doc-logo" src="${esc(logoSrc)}" alt="">` : ''}<div><h1>Plan nutricional por tipo de día</h1>
+    <p><b>${esc(client ? client.full_name : 'Plantilla')}</b> · ${esc(plan.name)}</p>
+    <p class="doc-sub">${esc(BRAND.name)} · ${new Date().toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}</p></div></div>`;
+  if (client && client.goal) h += `<p><b>Objetivo:</b> ${esc(client.goal)}</p>`;
+  const per = WEEKDAYS.slice(1).concat('Domingo');
+  h += `<h2>Requerimientos por tipo de día</h2><table class="doc-t"><thead><tr><th>Tipo de día</th><th>Días</th><th class="n">Energía</th><th class="n">Proteína</th><th class="n">Carbohidratos</th><th class="n">Grasa</th><th class="n">Agua</th></tr></thead><tbody>
+    ${all.map(v => `<tr><td><b>${esc(dayLabel(v))}</b></td><td>${esc((v.weekdays || []).map(x => x.slice(0, 3)).join(', ') || (v === plan ? 'Resto' : '—'))}</td><td class="n">${fmtInt(num(v.kcal))} kcal</td><td class="n">${fmtInt(num(v.protein_g))} g${w ? `<br><small>${fmtN(num(v.protein_g) / w)} g/kg</small>` : ''}</td><td class="n">${fmtInt(num(v.carbs_g))} g${w ? `<br><small>${fmtN(num(v.carbs_g) / w)} g/kg</small>` : ''}</td><td class="n">${fmtInt(num(v.fat_g))} g</td><td class="n">${v.water_ml ? (v.water_ml / 1000).toLocaleString('es-CO') + ' L' : '—'}</td></tr>`).join('')}</tbody></table>`;
+  const wk = per.map(dn => all.find(v => (v.weekdays || []).includes(dn)) || plan);
+  const avgK = wk.reduce((a, v) => a + num(v.kcal), 0) / 7;
+  h += `<p class="doc-sub">Promedio semanal: ${fmtInt(avgK)} kcal/día.</p>`;
+  if (typeof docHBars === 'function') h += `<h3>Energía por tipo de día (kcal)</h3>${docHBars(all.map(v => ({ label: dayLabel(v), value: num(v.kcal), text: fmtInt(num(v.kcal)) })))}<h3>Carbohidratos por tipo de día (g)</h3>${docHBars(all.map(v => ({ label: dayLabel(v), value: num(v.carbs_g), text: fmtInt(num(v.carbs_g)) + ' g' })))}`;
+  h += `<h2>Semana tipo</h2><table class="doc-t"><thead><tr>${per.map(dn => `<th>${dn.slice(0, 3)}</th>`).join('')}</tr></thead><tbody><tr>${wk.map(v => `<td><b>${esc(v.day_code || '—')}</b></td>`).join('')}</tr></tbody></table>`;
+  const rgs = ovRanges(plan);
+  if (rgs.length) h += `<h3>Fechas especiales</h3><table class="doc-t"><thead><tr><th>Fechas</th><th>Tipo de día</th><th>Indicación</th></tr></thead><tbody>${rgs.map(r => { const v = all.find(x => x.day_code === r.o.c); return `<tr><td>${esc(rangeLbl(r))}</td><td>${esc(v ? dayLabel(v) : r.o.c || 'Según el día de la semana')}</td><td>${esc(ovText(r.o))}</td></tr>`; }).join('')}</tbody></table>`;
+  if (plan.notes) h += `<h2>Indicaciones generales</h2><p class="pre">${esc(plan.notes)}</p>`;
+  for (const v of all) {
+    h += `<h2 class="doc-day">${esc(dayLabel(v))}${(v.weekdays || []).length ? ' · ' + esc(v.weekdays.join(', ')) : ''}</h2>
+      <table class="doc-t targets"><thead><tr><th>Energía</th><th>Proteína</th><th>Carbohidratos</th><th>Grasa</th><th>Agua</th></tr></thead><tbody><tr>${targetsRow(v)}</tr></tbody></table>
+      <p class="doc-sub">Aporte promedio del menú: ${macroLine(planAvgTotals(v))}.</p>`;
+    if (v.day_notes) h += `<p class="pre">${esc(v.day_notes)}</p>`;
+    h += mealsDocHtml(v, false, 1, true);
+  }
+  h += `<p class="doc-foot">Los gramos corresponden al alimento en el estado indicado en su nombre (por ejemplo, «cocido»). Los reemplazos aportan la misma cantidad del nutriente principal del grupo. El tipo de día de cada fecha aparece en la pantalla Hoy de la aplicación. Documento elaborado por ${esc(BRAND.name)}.</p>`;
+  return h;
+}
 function planDocHtml(plan, client, logoSrc) {
+  if (hasDayTypes(plan)) return multiDocHtml(plan, client, logoSrc);
   const t = targetsOf(plan); const avg = planAvgTotals(plan);
   const pct = (g, k) => t.kcal ? Math.round(g * k / t.kcal * 100) + ' %' : '';
   let h = `<div class="doc-h">${logoSrc ? `<img class="doc-logo" src="${esc(logoSrc)}" alt="">` : ''}<div><h1>Plan nutricional</h1>
@@ -473,25 +599,7 @@ function planDocHtml(plan, client, logoSrc) {
       <p class="doc-sub">Días de entreno: ${esc((plan.train_days || []).join(', ') || 'los días con sesión de entrenamiento o de deporte')}. En los días de descanso se usan las cantidades de la columna «Descanso» para los alimentos del grupo de carbohidratos.${plan.peri_meals && (plan.peri_meals.pre || plan.peri_meals.post) ? ` Comidas cercanas al entrenamiento: ${esc([plan.peri_meals.pre && plan.peri_meals.pre + ' (antes)', plan.peri_meals.post && plan.peri_meals.post + ' (después)'].filter(Boolean).join(' y '))}.` : ''}</p>`;
   }
   if (plan.notes) h += `<h2>Indicaciones generales</h2><p class="pre">${esc(plan.notes)}</p>`;
-  for (const m of plan.meals) {
-    h += `<h2>${esc(m.name)}${m.time_label ? ' · ' + esc(m.time_label) : ''}</h2>`;
-    if (m.instructions) h += `<p class="pre">${esc(m.instructions)}</p>`;
-    for (const o of m.options.filter(x => x.items.length)) {
-      const ot = optionTotals(o);
-      if (m.options.filter(x => x.items.length).length > 1) h += `<h3>${esc(o.name)}</h3>`;
-      h += `<table class="doc-t"><thead><tr><th>Alimento</th><th class="n">${cyc ? 'Entreno' : 'Gramos'}</th>${cyc ? '<th class="n">Descanso</th>' : ''}<th>Medida casera</th><th class="n">kcal</th><th class="n">P</th><th class="n">C</th><th class="n">G</th></tr></thead><tbody>`;
-      const repl = [];
-      for (const i of o.items) {
-        const f = foodOf(i.food_id); if (!f) continue; const mm = macrosFor(f, i.grams);
-        h += `<tr><td>${esc(f.name)}${i.note ? `<br><small>${esc(i.note)}</small>` : ''}</td><td class="n">${fmtN(i.grams)} g</td>${cyc ? `<td class="n">${isCarbFood(f) ? fmtN(Math.max(1, roundG(num(i.grams) * rfd))) + ' g' : '='}</td>` : ''}<td>${esc(unitText(f, i.grams).replace('≈ ', ''))}</td><td class="n">${fmtInt(mm.kcal)}</td><td class="n">${fmtN(mm.protein)}</td><td class="n">${fmtN(mm.carbs)}</td><td class="n">${fmtN(mm.fat)}</td></tr>`;
-        const eq = equivalents(f, num(i.grams), 3);
-        if (eq.length) repl.push(`<li><b>${esc(f.name)} ${fmtN(i.grams)} g:</b> ${eq.map(e => `${esc(e.food.name)} ${fmtN(e.grams)} g`).join(' · ')}</li>`);
-      }
-      h += `</tbody><tfoot><tr><td>Total</td><td></td>${cyc ? '<td></td>' : ''}<td></td><td class="n">${fmtInt(ot.kcal)}</td><td class="n">${fmtN(ot.protein)}</td><td class="n">${fmtN(ot.carbs)}</td><td class="n">${fmtN(ot.fat)}</td></tr></tfoot></table>`;
-      if (repl.length) h += `<p class="small"><b>Opciones de reemplazo</b></p><ul class="doc-repl">${repl.join('')}</ul>`;
-      if (typeof recipeDocHtml === 'function') h += recipeDocHtml(o);
-    }
-  }
+  h += mealsDocHtml(plan, cyc, rfd, false);
   h += `<p class="doc-foot">Los gramos corresponden al alimento en el estado indicado en su nombre (por ejemplo, «cocido»). Los reemplazos aportan la misma cantidad del nutriente principal del grupo (proteína, carbohidratos, grasa o energía). Documento elaborado por ${esc(BRAND.name)}.</p>`;
   return h;
 }
@@ -508,17 +616,18 @@ async function vPlanDoc(id) {
   const plan = id ? await loadPlanFull(id) : await activePlanFor(S.profile.id);
   if (!plan) return paint('<div class="card empty"><p>Plan no encontrado.</p></div>');
   const client = plan.client_id ? (await DB.select('profiles', { eq: { id: plan.client_id } }))[0] : null;
-  ensureDocCss();
+  if (client && hasDayTypes(plan)) { const b = (await DB.select('body_logs', { eq: { client_id: client.id }, order: 'log_date', asc: false, limit: 10 })).find(r => num(r.weight_kg)); if (b) client.weight_kg = b.weight_kg; }
+  if (typeof ensureReportCss === 'function') ensureReportCss(); else ensureDocCss();
   const logo = BRAND.logoFull || BRAND.logo;
   paint(`<div class="row-btns no-print"><button class="btn" data-act="back">← Volver</button><button class="btn primary" data-act="pdf">Descargar PDF</button><button class="btn" data-act="html">Descargar HTML</button>${S.profile.role === 'coach' ? `<a class="btn" href="#/plan-nutri/${plan.id}">Editar</a>` : ''}</div>
     <p class="small muted no-print">«Descargar PDF» abre la ventana de impresión: elige «Guardar como PDF».</p>
-    <div class="doc">${planDocHtml(plan, client, logo)}</div>`, {
+    <div class="doc-x"><div class="doc">${planDocHtml(plan, client, logo)}</div></div>`, {
     click: {
       back: () => history.back(),
       pdf: () => { const t = document.title; document.title = docName(plan, client); window.print(); setTimeout(() => { document.title = t; }, 1000); },
       html: async () => {
         const body = planDocHtml(plan, client, logo ? await toDataUrl(logo) : '');
-        downloadFile(docName(plan, client) + '.html', `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(docName(plan, client))}</title><style>body{margin:0;background:#f3f5f1}.wrap{max-width:820px;margin:0 auto;padding:16px}${DOC_CSS}</style></head><body><div class="wrap"><div class="doc">${body}</div></div></body></html>`, 'text/html');
+        downloadFile(docName(plan, client) + '.html', `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(docName(plan, client))}</title><style>body{margin:0;background:#f3f5f1}.wrap{max-width:820px;margin:0 auto;padding:16px}${DOC_CSS}${typeof DOC_BARS_CSS === 'string' ? DOC_BARS_CSS : ''}</style></head><body><div class="wrap"><div class="doc">${body}</div></div></body></html>`, 'text/html');
       }
     }
   });
@@ -532,13 +641,21 @@ async function vCompras(id, days) {
   const plan = await loadPlanFull(id);
   if (!plan) return paint('<div class="card empty"><p>Plan no encontrado.</p></div>');
   const agg = {};
-  plan.meals.forEach(m => { const os = m.options.filter(o => o.items.length); os.forEach(o => o.items.forEach(i => { agg[i.food_id] = (agg[i.food_id] || 0) + num(i.grams) * days / os.length; })); });
+  const rot = m => m.options.some(o => (o.weekdays || []).length);
+  const multi = hasDayTypes(plan) || plan.meals.some(rot);
+  if (multi) {
+    // Día por día: tipo de día de cada fecha y opción asignada al día de la semana (rotaciones)
+    for (let k = 0; k < days; k++) {
+      const d = addDays(todayStr(), k); const v = planForDate(plan, d);
+      v.meals.forEach(m => { const os = rot(m) ? [defaultOption(m, d)].filter(o => o && o.items.length) : m.options.filter(o => o.items.length); os.forEach(o => o.items.forEach(i => { agg[i.food_id] = (agg[i.food_id] || 0) + num(i.grams) / os.length; })); });
+    }
+  } else plan.meals.forEach(m => { const os = m.options.filter(o => o.items.length); os.forEach(o => o.items.forEach(i => { agg[i.food_id] = (agg[i.food_id] || 0) + num(i.grams) * days / os.length; })); });
   const key = 'dp_compras_' + id; let checked = {};
   try { checked = JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) { }
   let total = 0, noPrice = 0; const coachShop = S.profile.role === 'coach';
   const qty = g => g >= 1000 ? (Math.round(g / 100) / 10).toLocaleString('es-CO') + ' kg' : Math.round(g / 5) * 5 + ' g';
   let html = `<div class="chips no-print">${[3, 7, 14].map(d => `<a class="chip${d === days ? ' on' : ''}" href="#/compras/${id}/${d}">${d} días</a>`).join('')}</div>
-    <p class="small muted">${esc(plan.name)}. Cantidades para ${days} días, con rotación equitativa de las opciones de cada comida. Los alimentos que el plan indica cocidos se convierten a peso en crudo aproximado.</p>`;
+    <p class="small muted">${esc(plan.name)}. Cantidades para ${days} días ${multi ? `desde hoy, según el tipo de día de cada fecha${hasDayTypes(plan) ? ' (' + dayVariants(plan).map(v => `${esc(v.day_code || dayLabel(v))}: ${dayTypeCounts(plan, todayStr(), days)[v.id] || 0}`).join(' · ') + ')' : ''} y las rotaciones por día de la semana` : 'con rotación equitativa de las opciones de cada comida'}. Los alimentos que el plan indica cocidos se convierten a peso en crudo aproximado.</p>`;
   for (const cat of FOOD_CATS) {
     const rows = Object.entries(agg).map(([fid, g]) => ({ f: foodOf(fid), g })).filter(x => x.f && x.f.category === cat).sort((a, b) => a.f.name.localeCompare(b.f.name, 'es'));
     if (!rows.length) continue;
@@ -606,12 +723,7 @@ async function adherenceSection(cid, dayLink) {
   const stats = days.map(d => {
     const dl = logs.filter(l => l.log_date === d); const dd = dailies.find(x => x.log_date === d);
     const m = dl.reduce((a, l) => addM(a, logM(l)), ZERO());
-    let comp = null;
-    if (plan) {
-      const ch = (dd && dd.choices) || {}; let total = 0, done = 0;
-      plan.meals.forEach(me => { const o = me.options.find(x => x.id === ch[me.id]) || me.options[0]; if (!o) return; total += o.items.length; done += o.items.filter(i => dl.some(l => l.plan_item_id === i.id)).length; });
-      comp = total ? Math.round(done / total * 100) : null;
-    }
+    const comp = plan ? dayCompletion(plan, dl, dd, d) : null;
     return { d, m, n: dl.length, comp, water: num(dd && dd.water_ml) };
   });
   const last7 = stats.slice(-7).filter(s => s.n);
@@ -620,7 +732,7 @@ async function adherenceSection(cid, dayLink) {
   const html = `
     <div class="stats3"><div><b>${last7.length}/7</b><small>Días con registro</small></div><div><b>${last7.length && plan ? Math.round(last7.reduce((a, s) => a + (s.comp || 0), 0) / last7.length) + ' %' : '—'}</b><small>Cumplimiento 7 días</small></div><div><b>${wAvg ? (wAvg / 1000).toLocaleString('es-CO', { maximumFractionDigits: 1 }) + ' L' : '—'}</b><small>Agua promedio</small></div></div>
     <div class="card"><h3>Calorías por día (kcal)</h3>${vbars(stats.map((s, i) => ({ label: fmtDM(parseDay(s.d)), value: s.m.kcal, text: s.m.kcal >= 1000 ? r1(s.m.kcal / 1000) + 'k' : Math.round(s.m.kcal), hi: i === 13 })), 'Sin registros de alimentación.')}
-      ${hasT ? `<p class="small muted">Objetivo diario: ${fmtInt(t.kcal)} kcal.</p>` : ''}</div>
+      ${hasT ? `<p class="small muted">${hasDayTypes(plan) ? 'Objetivo según el tipo de día: ' + dayVariants(plan).map(v => `${esc(v.day_code || dayLabel(v))} ${fmtInt(num(v.kcal))} kcal`).join(' · ') : `Objetivo diario: ${fmtInt(t.kcal)} kcal`}.</p>` : ''}</div>
     ${plan ? `<div class="card"><h3>Cumplimiento del plan por día (%)</h3>${vbars(stats.map((s, i) => ({ label: fmtDM(parseDay(s.d)), value: s.comp || 0, text: s.comp == null ? '' : s.comp, hi: i === 13 })), 'Sin registros.')}<p class="small muted">Porcentaje de alimentos del plan marcados como consumidos (incluye reemplazos).</p></div>` : ''}
     <div class="card"><h3>Promedio diario · últimos 7 días</h3>${macroBars(avg, hasT ? t : null)}<p class="small muted">Calculado sobre los días con registro.</p></div>
     <h2 class="sec">Días</h2>
@@ -637,10 +749,12 @@ async function vAdherencia() { const a = await adherenceSection(S.profile.id, d 
    ENTRENADOR · Nutrición del asesorado
    ===================================================================== */
 async function coachNutriTab(cid) {
-  const plans = await DB.select('nutrition_plans', { eq: { client_id: cid }, order: 'created_at', asc: false });
-  const html = `<div class="row-btns"><button class="btn primary" data-act="nNew">+ Nuevo plan</button><button class="btn" data-act="nTpl">Desde plantilla</button><a class="btn" href="#/diario/${cid}/${todayStr()}">Ver diario</a></div>
+  const all = await DB.select('nutrition_plans', { eq: { client_id: cid }, order: 'created_at', asc: false });
+  const plans = all.filter(p => !p.variant_of);
+  const nv = p => all.filter(x => x.variant_of === p.id).length;
+  const html = `<div class="row-btns"><button class="btn primary" data-act="nNew">+ Nuevo plan</button><button class="btn" data-act="nTpl">Desde plantilla</button>${typeof importModal === 'function' && !S.needsV7 ? `<button class="btn" data-act="nImp">Importar plan</button>` : ''}<a class="btn" href="#/diario/${cid}/${todayStr()}">Ver diario</a></div>
     ${plans.length ? plans.map(p => `<div class="card">
-      <div class="day-h"><div><h3>${esc(p.name)}</h3><small class="muted">${esc(targetsLine(p))}</small></div><span class="badge ${p.review ? 'warnb' : p.active ? 'ok' : ''}">${p.review ? 'Borrador' : p.active ? 'Activo' : 'Inactivo'}</span></div>
+      <div class="day-h"><div><h3>${esc(p.name)}</h3><small class="muted">${nv(p) ? `${nv(p) + 1} tipos de día · ` : ''}${esc(targetsLine(p))}</small></div><span class="badge ${p.review ? 'warnb' : p.active ? 'ok' : ''}">${p.review ? 'Borrador' : p.active ? 'Activo' : 'Inactivo'}</span></div>
       <div class="row-btns"><a class="btn sm primary" href="#/plan-nutri/${p.id}">Editar</a><a class="btn sm" href="#/plan-ver/${p.id}">Ver / PDF</a><button class="btn sm" data-act="nToggle" data-id="${p.id}" data-on="${p.active ? 1 : 0}">${p.active ? 'Desactivar' : 'Activar'}</button><button class="btn sm" data-act="nDup" data-id="${p.id}">Duplicar</button><button class="btn sm danger-outline" data-act="nDel" data-id="${p.id}">Eliminar</button></div>
     </div>`).join('') : '<div class="card empty"><p>Este asesorado no tiene plan nutricional. Crea uno nuevo o parte de una plantilla.</p></div>'}
     <p class="small muted">Solo un plan puede estar activo: es el que el asesorado ve en su diario.</p>`;
@@ -648,6 +762,7 @@ async function coachNutriTab(cid) {
     html, click: {
       nNew: async () => { const name = prompt('Nombre del plan:', 'Plan nutricional · Fase 1'); if (!name) return; const id = await createBlankPlan({ clientId: cid, name: name.trim() }); location.hash = '#/plan-nutri/' + id; },
       nTpl: () => templatePickModal(cid),
+      nImp: () => importModal(cid),
       nToggle: async el => { const on = el.dataset.on === '1'; if (!on) await deactivatePlans(cid); await DB.update('nutrition_plans', el.dataset.id, { active: !on }); route(); },
       nDup: el => copyPlanModal(el.dataset.id),
       nDel: async el => { if (!confirm('¿Eliminar el plan nutricional? Los registros diarios del asesorado se conservan.')) return; await DB.remove('nutrition_plans', el.dataset.id); toast('Plan eliminado'); route(); }
@@ -661,7 +776,7 @@ async function coachSeguimientoTab(cid) {
 }
 
 async function templatePickModal(cid) {
-  const tpls = await DB.select('nutrition_plans', { eq: { is_template: true }, order: 'name' });
+  const tpls = (await DB.select('nutrition_plans', { eq: { is_template: true }, order: 'name' })).filter(p => !p.variant_of);
   if (!tpls.length) return toast('No hay plantillas. Créalas en la sección Plantillas.', 'error');
   modal(`${modalHead('Crear desde plantilla')}
     <label class="field"><span>Calorías objetivo para este asesorado (opcional)</span><input class="input" id="tp-k" inputmode="numeric" placeholder="Ej.: 2600"></label>
@@ -712,30 +827,84 @@ function kcalCalcModal(plan, after) {
 /* =====================================================================
    ENTRENADOR · Editor del plan nutricional
    ===================================================================== */
+/* Copia un menú como nuevo tipo de día del plan raíz, con las porciones ajustadas a las metas indicadas */
+async function addDayType(root, src, rec) {
+  const nt = { kcal: num(rec.kcal), protein: num(rec.protein_g), carbs: num(rec.carbs_g), fat: num(rec.fat_g) };
+  const fac = nt.kcal && typeof macroFactors === 'function' ? macroFactors(src.meals, nt) : null;
+  const [np] = await DB.insert('nutrition_plans', Object.assign({ client_id: root.client_id || null, is_template: !!root.is_template, name: root.name, water_ml: src.water_ml, notes: '', active: false, variant_of: root.id, weekdays: [] }, rec));
+  for (const m of src.meals) {
+    const [nm] = await DB.insert('plan_meals', { plan_id: np.id, name: m.name, time_label: m.time_label, instructions: m.instructions, position: m.position });
+    for (const op of m.options) {
+      const [no] = await DB.insert('plan_options', Object.assign({ meal_id: nm.id, name: op.name, position: op.position }, op.recipe ? { recipe: op.recipe } : {}, (op.weekdays || []).length ? { weekdays: op.weekdays } : {}));
+      await DB.insert('plan_items', op.items.map(i => { const f = foodOf(i.food_id); const k = fac && f ? fac[MACRO_GROUP(f.category)] : 1; return { option_id: no.id, food_id: i.food_id, grams: Math.max(1, roundG(num(i.grams) * k)), position: i.position, note: i.note }; }));
+    }
+  }
+  return np.id;
+}
+function addDayTypeModal(root, cur) {
+  const all = dayVariants(root);
+  const used = new Set(all.map(v => v.day_code));
+  const code = 'ABCDEFGH'.split('').find(c => !used.has(c)) || '';
+  modal(`${modalHead('Nuevo tipo de día')}
+    <p class="small muted">Cada tipo de día tiene sus propias metas y su menú. El menú se copia del tipo elegido y las porciones se ajustan a las nuevas metas por grupo (proteína, carbohidratos y grasa).</p>
+    <div class="rex-grid two"><label><span>Código</span><input class="input" id="dt-c" value="${esc(code)}" maxlength="3"></label><label><span>Nombre</span><input class="input" id="dt-n" placeholder="Ej.: Descanso, Doble sesión, Partido"></label></div>
+    <div class="rex-grid"><label><span>kcal</span><input class="input" id="dt-k" inputmode="numeric" value="${num(cur.kcal) || ''}"></label><label><span>Proteína g</span><input class="input" id="dt-p" inputmode="numeric" value="${num(cur.protein_g) || ''}"></label><label><span>Carbs g</span><input class="input" id="dt-ch" inputmode="numeric" value="${num(cur.carbs_g) || ''}"></label><label><span>Grasa g</span><input class="input" id="dt-g" inputmode="numeric" value="${num(cur.fat_g) || ''}"></label></div>
+    <label class="field"><span>Copiar el menú de</span><select class="input" id="dt-src">${all.map(v => `<option value="${v.id}"${v.id === cur.id ? ' selected' : ''}>${esc(dayLabel(v))}</option>`).join('')}</select></label>
+    ${root.day_code ? '' : `<label class="field"><span>Código del tipo de día actual</span><input class="input" id="dt-rc" value="${code === 'A' ? 'A' : ''}" placeholder="A"></label><label class="field"><span>Nombre del tipo de día actual</span><input class="input" id="dt-rn" placeholder="Ej.: Entreno"></label>`}
+    <button class="btn primary block" data-act="ok">Crear tipo de día</button>`, {
+    click: {
+      ok: async el => {
+        let c = $('#dt-c').value.trim().toUpperCase();
+        if (!root.day_code) { const rc = ($('#dt-rc').value.trim() || 'A').toUpperCase(); await DB.update('nutrition_plans', root.id, { day_code: rc, day_name: $('#dt-rn').value.trim() || null, weekdays: root.weekdays || [] }); root.day_code = rc; if (c === rc) c = 'B'; }
+        if (!c || dayVariants(root).some(v => v.day_code === c)) return toast('Usa un código distinto para cada tipo de día', 'error');
+        el.disabled = true;
+        const src = all.find(v => v.id === $('#dt-src').value) || cur;
+        const nid = await addDayType(root, src, { day_code: c, day_name: $('#dt-n').value.trim() || null, kcal: num($('#dt-k').value) || null, protein_g: num($('#dt-p').value) || null, carbs_g: num($('#dt-ch').value) || null, fat_g: num($('#dt-g').value) || null });
+        closeModal(); toast('Tipo de día creado. Asigna los días de la semana.'); location.hash = '#/plan-nutri/' + nid;
+      }
+    }
+  });
+}
 async function vPlanEditor(id) {
   const plan = await loadPlanFull(id);
   if (!plan) return paint('<div class="card empty"><p>Plan no encontrado.</p></div>');
+  const root = plan.variant_of ? await loadPlanFull(plan.variant_of) : plan;
+  if (!root) return paint('<div class="card empty"><p>Plan no encontrado.</p></div>');
+  const multi = hasDayTypes(root);
   const client = plan.client_id ? (await DB.select('profiles', { eq: { id: plan.client_id } }))[0] : null;
   const tot = planAvgTotals(plan); const t = targetsOf(plan);
   const back = plan.is_template ? '#/plantillas' : `#/asesorado/${plan.client_id}/nutricion`;
+  const per = WEEKDAYS.slice(1).concat('Domingo');
+  const ovs = ovRanges(root);
   const fromMacros = t.protein * 4 + t.carbs * 4 + t.fat * 9;
   const rerender = () => keepScroll(() => vPlanEditor(id));
   const inp = (tbl, rid, f, v, extra = '') => `<input class="input" data-tbl="${tbl}" data-id="${rid}" data-f="${f}" value="${esc(v ?? '')}" ${extra}>`;
 
+  const dtCard = S.needsV7 ? '' : `<div class="card dt-ed"><h3>Tipos de día</h3>
+      <div class="chips">${dayVariants(root).map(v => `<a class="chip${v.id === id ? ' on' : ''}" href="#/plan-nutri/${v.id}">${esc(dayLabel(v))}${num(v.kcal) ? ' · ' + fmtInt(num(v.kcal)) : ''}</a>`).join('')}<button class="chip add" data-act="addDT">+ Tipo de día</button></div>
+      ${multi ? `<div class="rex-grid two"><label><span>Código</span>${inp('nutrition_plans', id, 'day_code', plan.day_code, 'maxlength="3"')}</label><label><span>Nombre del tipo de día</span>${inp('nutrition_plans', id, 'day_name', plan.day_name)}</label></div>
+        <label class="field"><span>Indicaciones de este tipo de día</span><textarea class="input" rows="2" data-tbl="nutrition_plans" data-id="${id}" data-f="day_notes" placeholder="Ej.: bebida con carbohidratos durante la sesión; pre-entreno 60–70 min antes.">${esc(plan.day_notes || '')}</textarea></label>
+        <div class="field"><span>Días de la semana con este tipo</span><div class="chips">${per.map(dn => `<button class="chip${(plan.weekdays || []).includes(dn) ? ' on' : ''}" data-act="dtWd" data-v="${dn}">${dn.slice(0, 3)}</button>`).join('')}</div></div>
+        <p class="small muted">Semana: ${per.map(dn => `${dn.slice(0, 2)} ${esc((dayVariants(root).find(v => (v.weekdays || []).includes(dn)) || root).day_code || '—')}`).join(' · ')}. Los días sin asignar usan el tipo base (${esc(root.day_code || '—')}).</p>
+        <h3>Fechas especiales</h3>
+        ${ovs.length ? `<table class="tbl"><tbody>${ovs.map(r => `<tr><td class="small">${esc(rangeLbl(r))}</td><td><b>${esc(r.o.c || 'Según el día')}</b></td><td class="small">${esc(ovText(r.o))}</td><td><button class="icon-btn danger" data-act="ovDel" data-d="${r.dates.join(',')}" aria-label="Quitar">✕</button></td></tr>`).join('')}</tbody></table>` : '<p class="small muted">Sin fechas especiales: competencias, descargas o semanas de progresión.</p>'}
+        <div class="ov-add"><input class="input" type="date" id="ov-d" value="${todayStr()}"><input class="input" type="date" id="ov-h" title="Hasta (opcional)"><select class="input" id="ov-c"><option value="">Según el día de la semana</option>${dayVariants(root).map(v => `<option value="${esc(v.day_code || '')}">${esc(v.day_code || dayLabel(v))}</option>`).join('')}</select><input class="input" id="ov-f" inputmode="numeric" placeholder="% CHO" title="Porcentaje de las porciones de carbohidratos (vacío = 100 %)"><input class="input" id="ov-n" placeholder="Motivo (opcional)"><button class="btn sm" data-act="ovAdd">Agregar</button></div>
+        ${plan.variant_of ? '<button class="btn sm danger-outline" data-act="delDT">Eliminar este tipo de día</button>' : ''}` : '<p class="small muted">Para deportistas con necesidades distintas según la carga del día: crea tipos de día (por ejemplo A = doble sesión, B = sesión normal, C = descanso), cada uno con metas y menú propios, y asígnalos a los días de la semana o a fechas concretas.</p>'}</div>`;
   let html = `<a class="linkbtn" href="${back}">← ${esc(client ? client.full_name : 'Plantillas')}</a>
     ${plan.review ? `<div class="warn-box small">Borrador generado automáticamente a partir de la valoración inicial. Revísalo y publícalo con «Aprobar y publicar» en la pestaña <a href="#/asesorado/${plan.client_id}/valoracion">Valoración</a>.</div>` : ''}
     <div class="card">
-      <label class="field"><span>Nombre del plan</span>${inp('nutrition_plans', id, 'name', plan.name)}</label>
+      ${plan.variant_of ? `<p><b>${esc(root.name)}</b> · ${esc(dayLabel(plan))}</p>` : `<label class="field"><span>Nombre del plan</span>${inp('nutrition_plans', id, 'name', plan.name)}</label>`}
       <div class="rex-grid"><label><span>kcal</span>${inp('nutrition_plans', id, 'kcal', plan.kcal, 'inputmode="numeric" data-type="num"')}</label><label><span>Proteína g</span>${inp('nutrition_plans', id, 'protein_g', plan.protein_g, 'inputmode="numeric" data-type="num"')}</label><label><span>Carbs g</span>${inp('nutrition_plans', id, 'carbs_g', plan.carbs_g, 'inputmode="numeric" data-type="num"')}</label><label><span>Grasa g</span>${inp('nutrition_plans', id, 'fat_g', plan.fat_g, 'inputmode="numeric" data-type="num"')}</label></div>
       ${fromMacros ? `<p class="small muted">Distribución: P ${Math.round(t.protein * 4 / fromMacros * 100)} % · C ${Math.round(t.carbs * 4 / fromMacros * 100)} % · G ${Math.round(t.fat * 9 / fromMacros * 100)} % (${fmtInt(fromMacros)} kcal según macronutrientes)</p>` : ''}
       <label class="field"><span>Agua diaria (ml)</span>${inp('nutrition_plans', id, 'water_ml', plan.water_ml, 'inputmode="numeric" data-type="int"')}</label>
-      ${S.needsV4 ? '' : `<label class="field"><span>Carbohidratos en días de descanso (g) · vacío = sin ciclado</span>${inp('nutrition_plans', id, 'rest_carbs_g', plan.rest_carbs_g, 'inputmode="numeric" data-type="num"')}</label>
+      ${S.needsV4 || (multi && plan.rest_carbs_g == null) ? '' : `<label class="field"><span>Carbohidratos en días de descanso (g) · vacío = sin ciclado</span>${inp('nutrition_plans', id, 'rest_carbs_g', plan.rest_carbs_g, 'inputmode="numeric" data-type="num"')}</label>
       <div class="field"><span>Días de entreno (usan las metas de día de entreno)</span><div class="chips">${WEEKDAYS.slice(1).concat('Domingo').map(dn => `<button class="chip${(plan.train_days || []).includes(dn) ? ' on' : ''}" data-act="tday" data-v="${dn}">${dn.slice(0, 3)}</button>`).join('')}</div></div>`}
       <label class="field"><span>Indicaciones generales</span><textarea class="input" rows="3" data-tbl="nutrition_plans" data-id="${id}" data-f="notes" placeholder="Hidratación, horarios, suplementación, comidas libres…">${esc(plan.notes || '')}</textarea></label>
-      ${plan.is_template ? '' : `<label class="check"><input type="checkbox" data-tbl="nutrition_plans" data-id="${id}" data-f="active" ${plan.active ? 'checked' : ''}> Plan activo (visible en el diario del asesorado)</label>`}
+      ${plan.is_template || plan.variant_of ? '' : `<label class="check"><input type="checkbox" data-tbl="nutrition_plans" data-id="${id}" data-f="active" ${plan.active ? 'checked' : ''}> Plan activo (visible en el diario del asesorado)</label>`}
       <div class="row-btns"><button class="btn sm" data-act="calc">Calculadora</button><button class="btn sm" data-act="setT">Objetivos = totales del plan</button><button class="btn sm" data-act="scale">Ajustar porciones a las kcal objetivo</button></div>
     </div>
-    <div class="card"><h3>Plan vs objetivo</h3>${macroBars(tot, t.kcal ? t : null)}<p class="small muted">Promedio diario considerando la rotación de las opciones de cada comida.</p></div>`;
+    ${dtCard}
+    <div class="card"><h3>Plan vs objetivo${multi ? ' · ' + esc(dayLabel(plan)) : ''}</h3>${macroBars(tot, t.kcal ? t : null)}<p class="small muted">Promedio diario considerando la rotación de las opciones de cada comida.</p></div>`;
 
   plan.meals.forEach((m, mi) => {
     const sel = m.options.find(o => o.id === S.editOpt[m.id]) || m.options[0];
@@ -752,6 +921,7 @@ async function vPlanEditor(id) {
         <div class="day-ed-h"><input class="input" data-tbl="plan_options" data-id="${sel.id}" data-f="name" value="${esc(sel.name)}" aria-label="Nombre de la opción">
           <button class="icon-btn" data-act="dupOpt" data-id="${sel.id}" data-meal="${m.id}" data-n="${m.options.length}" aria-label="Duplicar opción">⧉</button>
           <button class="icon-btn danger" data-act="delOpt" data-id="${sel.id}" aria-label="Eliminar opción">✕</button></div>
+        ${S.needsV7 || m.options.length < 2 ? '' : `<div class="field"><span>Días de la semana de esta opción (rotación; vacío = a elección)</span><div class="chips">${per.map(dn => `<button class="chip sm${(sel.weekdays || []).includes(dn) ? ' on' : ''}" data-act="optWd" data-id="${sel.id}" data-v="${dn}">${dn.slice(0, 3)}</button>`).join('')}</div></div>`}
         ${sel.items.map((it, ii) => { const f = foodOf(it.food_id); const mm = f ? macrosFor(f, it.grams) : ZERO(); return `<div class="pi">
           <div class="rex-h"><b>${esc(f ? f.name : 'Alimento eliminado')}</b><span class="rex-btns">
             <button class="icon-btn" data-act="mvItem" data-id="${it.id}" data-opt="${sel.id}" data-dir="-1" ${ii === 0 ? 'disabled' : ''} aria-label="Subir">↑</button>
@@ -770,7 +940,7 @@ async function vPlanEditor(id) {
     </div>`;
   });
   html += `<button class="btn ghost block" data-act="addMeal">+ Añadir comida</button>
-    <div class="row-btns"><a class="btn" href="#/plan-ver/${id}">Ver documento / PDF</a>${plan.is_template ? '' : `<a class="btn" href="#/compras/${id}">Lista de compras</a>`}</div>
+    <div class="row-btns"><a class="btn" href="#/plan-ver/${root.id}">Ver documento / PDF</a>${plan.is_template ? '' : `<a class="btn" href="#/compras/${root.id}">Lista de compras</a>`}</div>
     <p class="small muted center">Los cambios se guardan automáticamente.</p>`;
 
   const reorder = async (table, list, idx, dir) => {
@@ -789,10 +959,29 @@ async function vPlanEditor(id) {
       if (tbl === 'plan_items' && f === 'grams' && !(v > 0)) { toast('Indica una cantidad mayor que cero', 'error'); return rerender(); }
       if (tbl === 'nutrition_plans' && f === 'active' && v && plan.client_id) await deactivatePlans(plan.client_id, id);
       await DB.update(tbl, rid, Object.assign({ [f]: v }, tbl === 'nutrition_plans' && f === 'active' && v ? { review: false } : {}));
-      if ((tbl === 'plan_items' && f === 'grams') || (tbl === 'nutrition_plans' && /kcal|_g$/.test(f))) rerender(); else toast('Guardado');
+      if ((tbl === 'plan_items' && f === 'grams') || (tbl === 'nutrition_plans' && /kcal|_g$|^day_/.test(f))) rerender(); else toast('Guardado');
     },
     click: {
       calc: () => kcalCalcModal(plan, rerender),
+      addDT: () => addDayTypeModal(root, plan),
+      dtWd: async el => {
+        const v = el.dataset.v; const cur = plan.weekdays || []; const on = cur.includes(v);
+        if (!on) for (const o of dayVariants(root)) if (o.id !== id && (o.weekdays || []).includes(v)) await DB.update('nutrition_plans', o.id, { weekdays: o.weekdays.filter(x => x !== v) });
+        await DB.update('nutrition_plans', id, { weekdays: on ? cur.filter(x => x !== v) : cur.concat(v) }); rerender();
+      },
+      optWd: async el => {
+        const o = findOpt(el.dataset.id); const v = el.dataset.v; const cur = o.weekdays || []; const on = cur.includes(v);
+        if (!on) { const m = plan.meals.find(x => x.options.includes(o)); for (const p of m.options) if (p !== o && (p.weekdays || []).includes(v)) await DB.update('plan_options', p.id, { weekdays: p.weekdays.filter(x => x !== v) }); }
+        await DB.update('plan_options', o.id, { weekdays: on ? cur.filter(x => x !== v) : cur.concat(v) }); rerender();
+      },
+      ovAdd: async () => {
+        const d0 = $('#ov-d').value, d1 = $('#ov-h').value || d0; if (!d0 || d1 < d0) return toast('Revisa las fechas', 'error');
+        const f = num($('#ov-f').value); const rec = {}; if ($('#ov-c').value) rec.c = $('#ov-c').value; if (f && f !== 100) rec.f = f / 100; const n = $('#ov-n').value.trim(); if (n) rec.n = n;
+        const ov = Object.assign({}, root.day_overrides || {}); for (let d = d0, k = 0; d <= d1 && k < 120; d = addDays(d, 1), k++) ov[d] = rec;
+        await DB.update('nutrition_plans', root.id, { day_overrides: ov }); rerender();
+      },
+      ovDel: async el => { const ov = Object.assign({}, root.day_overrides || {}); el.dataset.d.split(',').forEach(d => { delete ov[d]; }); await DB.update('nutrition_plans', root.id, { day_overrides: ov }); rerender(); },
+      delDT: async () => { if (!confirm('¿Eliminar este tipo de día con su menú? Los días asignados pasan al tipo base.')) return; await DB.remove('nutrition_plans', id); location.hash = '#/plan-nutri/' + root.id; },
       tday: async el => { const v = el.dataset.v; const cur = plan.train_days || []; await DB.update('nutrition_plans', id, { train_days: cur.includes(v) ? cur.filter(x => x !== v) : cur.concat(v) }); rerender(); },
       setT: async () => { if (!tot.kcal) return toast('El plan no tiene alimentos', 'error'); await DB.update('nutrition_plans', id, { kcal: Math.round(tot.kcal / 10) * 10, protein_g: Math.round(tot.protein), carbs_g: Math.round(tot.carbs), fat_g: Math.round(tot.fat) }); toast('Objetivos actualizados'); rerender(); },
       scale: async () => {
@@ -839,7 +1028,7 @@ async function vPlanEditor(id) {
    ENTRENADOR · Plantillas
    ===================================================================== */
 async function vPlantillas() {
-  const np = await DB.select('nutrition_plans', { eq: { is_template: true }, order: 'name' });
+  const np = (await DB.select('nutrition_plans', { eq: { is_template: true }, order: 'name' })).filter(p => !p.variant_of);
   const rt = await DB.select('routines', { eq: { is_template: true }, order: 'name' });
   const days = await DB.select('routine_days', { inn: { routine_id: rt.map(r => r.id) } });
   const html = `<p class="small muted">Las plantillas se asignan a cualquier asesorado. Los planes nutricionales se escalan a las calorías de cada persona.</p>

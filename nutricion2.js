@@ -163,11 +163,13 @@ const SUPPS = {
   nitratos: { name: 'Nitratos (jugo de remolacha)', dose: () => '6–8 mmol de nitrato (≈370–500 mg; 70–140 ml de jugo concentrado)', timing: '2–3 h antes de la competencia; en torneos, a diario desde 3 días antes', when: 'competencia', note: 'Evitar enjuague bucal antibacteriano, porque reduce la conversión del nitrato. Puede colorear la orina.' },
   bicarbonato: { name: 'Bicarbonato de sodio', dose: w => `${fmtN(w * 0.2)}–${fmtN(w * 0.3)} g (0,2–0,3 g/kg)`, timing: '60–180 min antes, fraccionado y con una comida rica en carbohidratos', when: 'competencia', note: 'Riesgo de molestias gastrointestinales: probar siempre en entrenamiento. Aporta sodio (27 % del peso).' }
 };
+/* Suplemento del catálogo o personalizado (importado del plan o agregado por el entrenador) */
+const suppOf = x => SUPPS[x.key] || (x.custom && x.name ? { name: x.name, dose: () => x.dose || '', timing: x.timing || '', note: '' } : null);
 async function supplementPlan(cid) { if (S.needsV6) return null; try { return (await DB.select('supplement_plans', { eq: { client_id: cid } }))[0] || null; } catch (e) { return null; } }
 function suppDocHtml(info, plan, w, logo) {
-  const items = (plan.items || []).filter(x => SUPPS[x.key]);
+  const items = (plan.items || []).filter(x => suppOf(x));
   return `<div class="doc-h">${logo ? `<img class="doc-logo" src="${esc(logo)}" alt="">` : ''}<div><h1>Protocolo de suplementación</h1><p><b>${esc(info.c.full_name || '')}</b></p><p class="doc-sub">${esc(BRAND.name)} · ${esc(fmtDateLong(todayStr()))} · peso de referencia ${fmtN(w)} kg</p></div></div>
-    <table class="doc-t"><thead><tr><th>Suplemento</th><th>Dosis</th><th>Momento</th><th>Indicaciones</th></tr></thead><tbody>${items.map(x => { const s = SUPPS[x.key]; return `<tr><td><b>${esc(s.name)}</b></td><td>${esc(x.dose || s.dose(w))}${x.loading && s.load ? `<br><small>${esc(s.load(w))}</small>` : ''}</td><td>${esc(x.timing || s.timing)}</td><td>${esc([s.note, x.note].filter(Boolean).join(' '))}</td></tr>`; }).join('')}</tbody></table>
+    <table class="doc-t"><thead><tr><th>Suplemento</th><th>Dosis</th><th>Momento</th><th>Indicaciones</th></tr></thead><tbody>${items.map(x => { const s = suppOf(x); return `<tr><td><b>${esc(s.name)}</b></td><td>${esc(x.dose || s.dose(w))}${x.loading && s.load ? `<br><small>${esc(s.load(w))}</small>` : ''}</td><td>${esc(x.timing || s.timing)}</td><td>${esc([s.note, x.note].filter(Boolean).join(' '))}</td></tr>`; }).join('')}</tbody></table>
     ${plan.notes ? `<h2>Indicaciones</h2><p class="pre">${esc(plan.notes)}</p>` : ''}
     <p class="doc-sub">Usar productos con certificación de terceros (Informed Sport, NSF Certified for Sport) para reducir el riesgo de contaminación con sustancias prohibidas. Referencias: Australian Institute of Sport, marco de suplementos (grupo A); International Society of Sports Nutrition; consenso del Comité Olímpico Internacional (2018).</p>
     <p class="doc-foot">Documento de ${esc(BRAND.name)}. Confidencial (Ley 1581 de 2012).</p>`;
@@ -185,6 +187,11 @@ async function suplementosTab(cid) {
       <div class="rex-grid"><label><span>Dosis</span><input class="input" data-sd="${k}" value="${esc(x && x.dose || s.dose(w))}" ${coach ? '' : 'disabled'}></label><label><span>Momento</span><input class="input" data-st="${k}" value="${esc(x && x.timing || s.timing)}" ${coach ? '' : 'disabled'}></label></div>
       ${s.load ? `<label class="check small"><input type="checkbox" data-sl="${k}" ${x && x.loading ? 'checked' : ''} ${coach ? '' : 'disabled'}> ${esc(s.load(w))}</label>` : ''}
       <p class="small muted">${esc(s.note)}</p>${x ? `<p class="small">Tomas registradas en 14 días: <b>${done}</b></p>` : ''}</div>`; }).join('')}
+    ${(plan.items || []).filter(x => x.custom).map((x, i) => `<div class="card supp on">
+      <label class="check"><input type="checkbox" data-cx="${i}" checked ${coach ? '' : 'disabled'}> <b>${esc(x.name)}</b> <span class="badge">Personalizado</span></label>
+      <div class="rex-grid"><label><span>Dosis</span><input class="input" data-cxd="${i}" value="${esc(x.dose || '')}" ${coach ? '' : 'disabled'}></label><label><span>Momento</span><input class="input" data-cxt="${i}" value="${esc(x.timing || '')}" ${coach ? '' : 'disabled'}></label></div>
+      ${x.note ? `<p class="small muted">${esc(x.note)}</p>` : ''}<p class="small">Tomas registradas en 14 días: <b>${logs.filter(l => l.supp_key === x.key).length}</b></p></div>`).join('')}
+    ${coach ? '<div class="row-btns"><button class="btn sm" data-act="spCustom">+ Otro suplemento</button></div>' : ''}
     <label class="field"><span>Indicaciones generales</span><textarea class="input" id="sp-n" rows="3" ${coach ? '' : 'disabled'}>${esc(plan.notes || '')}</textarea></label>
     ${coach ? '<button class="btn primary block" data-act="spSave">Guardar protocolo</button>' : ''}
     ${(plan.items || []).length ? '<div class="row-btns"><button class="btn" data-act="pdf">PDF</button><button class="btn" data-act="html">HTML</button></div>' : ''}`;
@@ -194,10 +201,19 @@ async function suplementosTab(cid) {
       ...docs,
       spSave: async () => {
         const its = Object.keys(SUPPS).filter(k => $(`[data-sp=${k}]`).checked).map(k => ({ key: k, dose: $(`[data-sd=${k}]`).value.trim(), timing: $(`[data-st=${k}]`).value.trim(), loading: !!($(`[data-sl=${k}]`) && $(`[data-sl=${k}]`).checked) }));
+        (plan.items || []).filter(x => x.custom).forEach((x, i) => { if ($(`[data-cx="${i}"]`).checked) its.push(Object.assign({}, x, { dose: $(`[data-cxd="${i}"]`).value.trim(), timing: $(`[data-cxt="${i}"]`).value.trim() })); });
         const rec = { items: its, notes: $('#sp-n').value.trim() || null, updated_at: new Date().toISOString() };
         const ex = await supplementPlan(cid);
         if (ex) await DB.update('supplement_plans', cid, rec, 'client_id'); else await DB.insert('supplement_plans', Object.assign({ client_id: cid }, rec));
         toast('Protocolo guardado'); route();
+      },
+      spCustom: async () => {
+        const name = prompt('Nombre del suplemento:', ''); if (!name || !name.trim()) return;
+        const dose = prompt('Dosis:', '') || ''; const timing = prompt('Momento de la toma:', '') || '';
+        const its = (plan.items || []).concat({ key: 'x_' + name.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '_').slice(0, 30), custom: true, name: name.trim(), dose: dose.trim(), timing: timing.trim() });
+        const ex = await supplementPlan(cid); const rec = { items: its, notes: plan.notes || null, updated_at: new Date().toISOString() };
+        if (ex) await DB.update('supplement_plans', cid, rec, 'client_id'); else await DB.insert('supplement_plans', Object.assign({ client_id: cid }, rec));
+        route();
       }
     }
   };
@@ -205,7 +221,7 @@ async function suplementosTab(cid) {
 async function supplementCardHtml() {
   const plan = await supplementPlan(S.profile.id); if (!plan || !(plan.items || []).length) return '';
   const logs = await DB.select('supplement_logs', { eq: { client_id: S.profile.id, log_date: todayStr() } });
-  return `<div class="card supp-today"><h3>Suplementos de hoy</h3>${plan.items.filter(x => SUPPS[x.key]).map(x => { const done = logs.some(l => l.supp_key === x.key); return `<div class="fi${done ? ' done' : ''}"><button class="chk" data-act="supTick" data-k="${x.key}" aria-label="Marcar ${esc(SUPPS[x.key].name)}">✓</button><div class="fi-b"><b>${esc(SUPPS[x.key].name)}</b><small>${esc(x.dose)} · ${esc(x.timing)}</small></div></div>`; }).join('')}
+  return `<div class="card supp-today"><h3>Suplementos de hoy</h3>${plan.items.filter(x => suppOf(x)).map(x => { const done = logs.some(l => l.supp_key === x.key); return `<div class="fi${done ? ' done' : ''}"><button class="chk" data-act="supTick" data-k="${x.key}" aria-label="Marcar ${esc(suppOf(x).name)}">✓</button><div class="fi-b"><b>${esc(suppOf(x).name)}</b><small>${esc(x.dose)} · ${esc(x.timing)}</small></div></div>`; }).join('')}
     <a class="small" href="#/suplementos">Ver protocolo completo</a></div>`;
 }
 const supplementHandlers = after => ({

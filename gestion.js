@@ -85,6 +85,7 @@ async function deleteClientFiles(cid) {
 }
 async function deleteClient(c) {
   await deleteClientFiles(c.id);
+  if (typeof deleteCaseFiles === 'function') await deleteCaseFiles(c.id);
   if (DEMO) await DB.remove('profiles', c.id);
   else await DB.rpc('delete_client', { target: c.id });
 }
@@ -225,8 +226,10 @@ async function reportData(cid, start, end) {
   const waist = bodies.filter(b => num(b.waist_cm) > 0); const wa0 = waist.filter(b => b.log_date <= start).pop() || waist.find(b => inP(b.log_date)); const wa1 = waist.filter(b => inP(b.log_date)).pop();
   const fat = bodies.filter(b => num(b.body_fat) > 0); const f0 = fat.filter(b => b.log_date <= start).pop() || fat.find(b => inP(b.log_date)); const f1 = fat.filter(b => inP(b.log_date)).pop();
   // Nutrición
-  const t = targetsOf(plan); const hasT = t && t.kcal > 0;
+  let t = targetsOf(plan); const hasT = t && t.kcal > 0;
   const days = Array.from({ length: nDays }, (_, i) => addDays(start, i));
+  // Con tipos de día, el objetivo del periodo es el promedio de las metas de cada fecha
+  if (hasT && hasDayTypes(plan)) { const ts = days.map(d => targetsOf(planForDate(plan, d, ((dailies.find(x => x.log_date === d) || {}).choices || {}).__dtype))); t = scaleM(ts.reduce((a, x) => addM(a, Object.assign(ZERO(), x)), ZERO()), 1 / ts.length); }
   const dstats = days.map(d => {
     const dl = logs.filter(l => l.log_date === d); const dd = dailies.find(x => x.log_date === d);
     return { d, n: dl.length, m: dl.reduce((a, l) => addM(a, logM(l)), ZERO()), comp: dl.length ? dayCompletion(plan, dl, dd) : null, water: num(dd && dd.water_ml) };

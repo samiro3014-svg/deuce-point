@@ -1,6 +1,6 @@
 /* Caché básica para abrir la app sin conexión. Red primero para recibir siempre la última versión. */
-const CACHE = 'deucepoint-v6';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'config.js', 'seed-exercises.js', 'seed-foods.js', 'nutri.js', 'auto.js', 'fotos.js', 'menus.js', 'gestion.js', 'tenis.js', 'nutricion2.js', 'comunidad.js', 'negocio.js', 'inicio.html', 'manifest.json', 'favicon.png', 'icon-192.png', 'logo.png', 'logo-mark.png'];
+const CACHE = 'deucepoint-v7';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'config.js', 'seed-exercises.js', 'seed-foods.js', 'nutri.js', 'auto.js', 'fotos.js', 'menus.js', 'gestion.js', 'tenis.js', 'nutricion2.js', 'comunidad.js', 'negocio.js', 'importar.js', 'inicio.html', 'manifest.json', 'favicon.png', 'icon-192.png', 'logo.png', 'logo-mark.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).catch(() => {})); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', e => {

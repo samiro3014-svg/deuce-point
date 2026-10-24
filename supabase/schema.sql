@@ -1296,5 +1296,83 @@ set data = '{"match_carb_gkg": 7, "pre_carb_gkg": 6, "taper_days": 7, "taper_pct
 where id = 1;
 
 
+-- #####################################################################
+--  Parte C · v7 · Tipos de día, importación del plan individual y expediente
+-- #####################################################################
+
+-- ---------- Tipos de día: cada tipo es un plan hijo (variant_of) con metas y menú propios ----------
+alter table public.nutrition_plans add column if not exists variant_of uuid references public.nutrition_plans(id) on delete cascade;
+alter table public.nutrition_plans add column if not exists day_code text;
+alter table public.nutrition_plans add column if not exists day_name text;
+alter table public.nutrition_plans add column if not exists day_notes text;
+alter table public.nutrition_plans add column if not exists weekdays jsonb not null default '[]'::jsonb;
+alter table public.nutrition_plans add column if not exists day_overrides jsonb not null default '{}'::jsonb;
+create index if not exists nutrition_plans_variant_idx on public.nutrition_plans (variant_of);
+-- Opciones asignadas a días de la semana (rotaciones)
+alter table public.plan_options add column if not exists weekdays jsonb not null default '[]'::jsonb;
+
+-- ---------- Expediente del asesorado (resultado del análisis individual) ----------
+create table if not exists public.case_reports (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references public.profiles(id) on delete cascade,
+  title text not null default 'Plan integral',
+  report_date date not null default current_date,
+  summary text,
+  data jsonb not null default '{}'::jsonb,
+  pending jsonb not null default '[]'::jsonb,
+  plan_id uuid references public.nutrition_plans(id) on delete set null,
+  visible boolean not null default true,
+  doc_path text, doc_type text check (doc_type is null or doc_type in ('pdf', 'html')), doc_name text,
+  created_by uuid default auth.uid() references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now());
+create index if not exists case_reports_client_idx on public.case_reports (client_id, created_at desc);
+alter table public.case_reports enable row level security;
+drop policy if exists "expediente_leer" on public.case_reports;
+create policy "expediente_leer" on public.case_reports for select to authenticated
+  using (public.is_staff() or (client_id = auth.uid() and visible));
+drop policy if exists "expediente_gestionar" on public.case_reports;
+create policy "expediente_gestionar" on public.case_reports for all to authenticated
+  using (public.is_coach()) with check (public.is_coach());
+
+-- Respuestas del asesorado a las preguntas pendientes
+create table if not exists public.case_answers (
+  id uuid primary key default gen_random_uuid(),
+  report_id uuid not null references public.case_reports(id) on delete cascade,
+  client_id uuid not null references public.profiles(id) on delete cascade,
+  answers jsonb not null default '[]'::jsonb,
+  seen boolean not null default false,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  unique (report_id));
+create index if not exists case_answers_seen_idx on public.case_answers (seen) where not seen;
+alter table public.case_answers enable row level security;
+drop policy if exists "respuestas_leer" on public.case_answers;
+create policy "respuestas_leer" on public.case_answers for select to authenticated
+  using (client_id = auth.uid() or public.is_staff());
+drop policy if exists "respuestas_crear" on public.case_answers;
+create policy "respuestas_crear" on public.case_answers for insert to authenticated
+  with check (client_id = auth.uid() and exists (select 1 from public.case_reports r where r.id = report_id and r.client_id = auth.uid() and r.visible));
+drop policy if exists "respuestas_editar" on public.case_answers;
+create policy "respuestas_editar" on public.case_answers for update to authenticated
+  using (client_id = auth.uid() or public.is_staff())
+  with check ((client_id = auth.uid() and exists (select 1 from public.case_reports r where r.id = report_id and r.client_id = auth.uid() and r.visible)) or public.is_staff());
+drop policy if exists "respuestas_borrar" on public.case_answers;
+create policy "respuestas_borrar" on public.case_answers for delete to authenticated using (public.is_coach());
+
+-- ---------- Documentos privados del expediente (PDF o HTML) ----------
+-- Ruta: <id del asesorado>/<id del expediente>.pdf|.html. El asesorado solo lee el documento de un expediente visible.
+insert into storage.buckets (id, name, public) values ('documents', 'documents', false)
+on conflict (id) do nothing;
+drop policy if exists "documentos_leer" on storage.objects;
+create policy "documentos_leer" on storage.objects for select to authenticated
+  using (bucket_id = 'documents' and (public.is_staff() or exists (select 1 from public.case_reports r where r.doc_path = storage.objects.name and r.client_id = auth.uid() and r.visible)));
+drop policy if exists "documentos_gestionar" on storage.objects;
+create policy "documentos_gestionar" on storage.objects for all to authenticated
+  using (bucket_id = 'documents' and public.is_coach()) with check (bucket_id = 'documents' and public.is_coach());
+
+-- ---------- Versión del esquema ----------
+update public.app_settings
+set data = data || '{"schema_version": 7}'::jsonb, updated_at = now()
+where id = 1;
+
 -- Último paso (después de registrarte en la app con tu correo):
 -- update public.profiles set role = 'coach' where email = 'TU_CORREO@ejemplo.com';

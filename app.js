@@ -65,8 +65,8 @@ function matchRow(row, o) {
 }
 const CASCADE = {
   routines: [['routine_days', 'routine_id']], routine_days: [['routine_exercises', 'day_id']], workouts: [['workout_sets', 'workout_id']],
-  nutrition_plans: [['plan_meals', 'plan_id']], plan_meals: [['plan_options', 'meal_id']], plan_options: [['plan_items', 'option_id']],
-  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id'], ['tennis_sessions', 'client_id'], ['wellness', 'client_id'], ['tournaments', 'client_id'], ['sweat_tests', 'client_id'], ['fitness_tests', 'client_id'], ['pain_reports', 'client_id'], ['anthropometry', 'client_id'], ['supplement_plans', 'client_id'], ['supplement_logs', 'client_id'], ['cycle_logs', 'client_id'], ['messages', 'client_id'], ['lesson_reads', 'client_id'], ['challenge_members', 'client_id'], ['payments', 'client_id'], ['surveys', 'client_id'], ['push_subscriptions', 'user_id'], ['reminder_prefs', 'user_id']]
+  nutrition_plans: [['plan_meals', 'plan_id'], ['nutrition_plans', 'variant_of']], case_reports: [['case_answers', 'report_id']], plan_meals: [['plan_options', 'meal_id']], plan_options: [['plan_items', 'option_id']],
+  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id'], ['tennis_sessions', 'client_id'], ['wellness', 'client_id'], ['tournaments', 'client_id'], ['sweat_tests', 'client_id'], ['fitness_tests', 'client_id'], ['pain_reports', 'client_id'], ['anthropometry', 'client_id'], ['supplement_plans', 'client_id'], ['supplement_logs', 'client_id'], ['cycle_logs', 'client_id'], ['messages', 'client_id'], ['lesson_reads', 'client_id'], ['challenge_members', 'client_id'], ['payments', 'client_id'], ['surveys', 'client_id'], ['push_subscriptions', 'user_id'], ['reminder_prefs', 'user_id'], ['case_reports', 'client_id'], ['case_answers', 'client_id']]
 };
 const RESTRICT = { exercises: [['routine_exercises', 'exercise_id'], ['workout_sets', 'exercise_id']], foods: [['plan_items', 'food_id']] };
 function cascadeDelete(d, table, id) {
@@ -193,6 +193,7 @@ function buildDemoData() {
   if (window.buildNutri2Demo) buildNutri2Demo(d);
   if (window.buildComunidadDemo) buildComunidadDemo(d);
   if (window.buildNegocioDemo) buildNegocioDemo(d);
+  if (window.buildImportarDemo) buildImportarDemo(d);
   return d;
 }
 
@@ -343,6 +344,7 @@ async function route() {
       if (name === 'alimento') return vAlimento(a);
       if (name === 'plan-nutri') return await vPlanEditor(a);
       if (name === 'plan-ver') return await vPlanDoc(a);
+      if (name === 'importar') return await vImport(a);
       if (name === 'compras') return await vCompras(a, b);
       if (name === 'diario') return await vHoy(b, a);
       if (name === 'resumen') return await vResumen(a);
@@ -362,6 +364,7 @@ async function route() {
     if (name === 'fotos') return await vFotos();
     if (name === 'informe') return await vInforme(a, b, c);
     if (name === 'informes') return await vMisInformes();
+    if (name === 'expediente') return await vMiExpediente(a);
     if (name === 'suplementos') return await vSuplementos();
     if (name === 'mensajes') return await vMensajes();
     if (name === 'encuesta') return vEncuesta();
@@ -907,6 +910,7 @@ function vPerfil() {
       <p class="small muted">Rol: ${p.role === 'coach' ? 'Entrenador' : p.role === 'assistant' ? 'Asistente' : 'Asesorado'}</p>
     </div>
     ${client ? `<a class="card row-link" href="#/valoracion"><div><b>Mi valoración inicial</b><small class="muted">Ver o descargar en PDF y HTML</small></div><span class="chev">›</span></a>
+      ${S.needsV7 ? '' : '<a class="card row-link" href="#/expediente"><div><b>Mi plan integral</b><small class="muted">Valoración completa, prioridades, preguntas de tu entrenador y documento</small></div><span class="chev">›</span></a>'}
       <a class="card row-link" href="#/checkin"><div><b>Check-in semanal</b><small class="muted">Peso, cumplimiento y sensaciones de la semana</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/fotos"><div><b>Fotos de progreso</b><small class="muted">Protegidas con tu contraseña de fotos</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/mensajes"><div><b>Mensajes</b><small class="muted">Conversación con tu entrenador</small></div><span class="chev">›</span></a>
@@ -980,7 +984,7 @@ async function vAsesorado(id, tab, sub) {
   const base = '#/asesorado/' + id;
   const mh = typeof membershipHead === 'function' && isCoach() ? await membershipHead(c) : { html: '', click: {} };
   if (typeof exportClientXlsx === 'function') { mh.html += `<div class="row-btns"><button class="btn sm" data-act="xlsC">Exportar ficha a Excel</button></div>`; mh.click.xlsC = async el => { el.disabled = true; try { await exportClientXlsx(c.id); } finally { el.disabled = false; } }; }
-  const tabs = `<div class="chips scroll tabs2">${[['valoracion', 'Valoración'], ['rutinas', 'Entreno'], ['nutricion', 'Nutrición'], ['seguimiento', 'Seguimiento'], ['mensajes', 'Mensajes'], ['checkins', 'Check-ins'], ['rendimiento', 'Rendimiento'], ['antropometria', 'Antropometría'], ['suplementos', 'Suplementos'], ['informes', 'Informes'], ['fotos', 'Fotos'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios']].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
+  const tabs = `<div class="chips scroll tabs2">${[['valoracion', 'Valoración'], ['rutinas', 'Entreno'], ['nutricion', 'Nutrición'], ['seguimiento', 'Seguimiento'], ['mensajes', 'Mensajes'], ['checkins', 'Check-ins'], ['rendimiento', 'Rendimiento'], ['antropometria', 'Antropometría'], ['suplementos', 'Suplementos'], ['informes', 'Informes'], ...(S.needsV7 ? [] : [['expediente', 'Expediente']]), ['fotos', 'Fotos'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios']].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
   const head = `<div class="card"><div class="day-h"><p class="small muted">${esc(c.email || '')}${c.phone ? ' · ' + esc(c.phone) : ''}</p>${waBtn(c.phone, `Hola ${firstName(c.full_name)}, `)}</div>
     <label class="field"><span>Objetivo del asesorado</span><textarea class="input" rows="2" data-goal placeholder="Ej.: Tenista juvenil · fuerza y potencia para la temporada">${esc(c.goal || '')}</textarea></label>
     ${mh.html}</div>`;
@@ -988,7 +992,7 @@ async function vAsesorado(id, tab, sub) {
   const handlers = { click: Object.assign({}, mh.click), change: async t => { if ('goal' in t.dataset) { await DB.update('profiles', id, { goal: t.value.trim() }); toast('Objetivo guardado'); } } };
 
   let after = null;
-  const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab, informes: typeof coachInformesTab === 'function' ? coachInformesTab : null, rendimiento: typeof rendimientoTab === 'function' ? (cid, s) => rendimientoTab(cid, s, base + '/rendimiento') : null, antropometria: typeof antropometriaTab === 'function' ? antropometriaTab : null, suplementos: typeof suplementosTab === 'function' ? suplementosTab : null, mensajes: typeof chatTab === 'function' ? chatTab : null };
+  const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab, informes: typeof coachInformesTab === 'function' ? coachInformesTab : null, rendimiento: typeof rendimientoTab === 'function' ? (cid, s) => rendimientoTab(cid, s, base + '/rendimiento') : null, antropometria: typeof antropometriaTab === 'function' ? antropometriaTab : null, suplementos: typeof suplementosTab === 'function' ? suplementosTab : null, mensajes: typeof chatTab === 'function' ? chatTab : null, expediente: typeof expedienteTab === 'function' ? expedienteTab : null };
   if (tab === 'historial') body = await historialHtml(id);
   else if (MODS[tab]) {
     const r = await MODS[tab](id, sub);

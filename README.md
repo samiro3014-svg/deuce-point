@@ -6,6 +6,37 @@ Dirección: https://samiro3014-svg.github.io/deuce-point/
 
 ---
 
+## Novedades de la versión 7 · individualización
+
+### Tipos de día en el plan nutricional
+- Cada plan puede tener varios **tipos de día** (por ejemplo A = doble sesión, B = sesión normal, C = descanso), cada uno con metas propias (kcal, proteína, carbohidratos, grasa, agua), indicaciones y menú completo.
+- Cada tipo se asigna a días de la semana. Las **fechas especiales** cambian el tipo de día en periodos concretos (taper, carga de carbohidratos, competencia) o el porcentaje de las porciones de carbohidratos (progresión, por ejemplo 80 % la primera semana).
+- **Rotaciones:** una opción de comida se puede asignar a días de la semana (por ejemplo, la proteína de la cena: pollo lunes, miércoles y sábado; lenteja martes y viernes). En Hoy aparece seleccionada la opción del día.
+- **Editor:** «+ Tipo de día» copia el menú de otro tipo y ajusta las porciones a las nuevas metas por grupo (proteína, carbohidratos y grasa).
+- **Hoy:** el asesorado ve el tipo de día de la fecha, sus metas y el menú correspondiente; puede elegir otro tipo si su día cambió.
+- El documento del plan (PDF/HTML) incluye la tabla de requerimientos por tipo de día, gráficas de barras de energía y carbohidratos, la semana tipo, las fechas especiales y el menú de cada tipo. Lista de compras, cumplimiento, check-ins, informe mensual, ajuste de calorías y recordatorios push usan el tipo de día de cada fecha.
+
+### Importar el plan individual desde tu análisis (IA)
+1. **Ficha › Expediente › Paquete para la IA:** descarga (o copia) un archivo con la valoración, las preguntas adicionales, mediciones, check-ins, registros, bienestar, competencias, molestias, el plan actual, las respuestas del asesorado y el catálogo de alimentos y ejercicios de la app, junto con las instrucciones de salida.
+2. Tu IA entrega el documento completo en HTML con el bloque de datos `deucepoint-plan` (o un JSON). Las instrucciones para configurarla están en **Instrucciones IA** (archivo `.md`).
+3. **Importar plan:** carga el HTML o el JSON y, si quieres, el PDF del informe. La vista previa muestra los tipos de día con la meta y lo que suma el menú, los alimentos emparejados con la base (✓ igual, ≈ aproximado, + nuevo, ✗ sin equivalente) y las advertencias. Elige qué aplicar: plan nutricional, expediente, preguntas pendientes, suplementos, competencias, rutina, objetivo del perfil y mensaje al asesorado.
+4. Las equivalencias de alimentos que corrijas se recuerdan para las siguientes importaciones.
+
+### Expediente del asesorado
+- Resumen, indicadores, prioridades (alta, media, baja), factores favorables, monitoreo, laboratorios, suplementación, secciones libres (protocolo de competencia, taper, preparación en lote, mercado) y el documento original (PDF o HTML) en almacenamiento privado.
+- El asesorado lo ve en **Perfil › Mi plan integral** cuando está marcado como visible, responde las preguntas pendientes y el entrenador recibe las respuestas en la bandeja.
+- Expediente en PDF y HTML.
+
+### Valoración inicial
+- **Ajustes › Preguntas adicionales:** preguntas propias (abiertas o de opción) que se agregan como un paso de la valoración. Las respuestas aparecen en la valoración, en el Excel y en el paquete para la IA.
+
+## Actualización a la versión 7
+
+1. **Supabase › SQL Editor › New query:** pegar todo `supabase/migracion-v7.sql` → **Run**. Incluye v4, v5 y v6: si no habías ejecutado la v6, basta con este archivo. Se puede ejecutar de nuevo sin errores.
+2. Recargar la app.
+3. Si usas las notificaciones push, volver a publicar la función `enviar-notificaciones` con el contenido actualizado de `supabase/functions/enviar-notificaciones/index.ts` (los recordatorios de comidas usan el tipo de día y la rotación).
+4. Ajustes de la versión 6 que siguen pendientes si no se hicieron: enlaces de pago, página de captación, lecciones base y llaves push.
+
 ## Novedades de la versión 6
 
 ### Rendimiento en tenis (Progreso › Rendimiento y ficha › Rendimiento)
@@ -46,7 +77,7 @@ Dirección: https://samiro3014-svg.github.io/deuce-point/
 - **Exportar a Excel:** ficha completa del asesorado (botón en la ficha y en Perfil del asesorado).
 - **Notificaciones push:** recordatorios con el menú vigente del plan, mensajes nuevos y, para el entrenador, valoraciones y check-ins nuevos.
 
-## Actualización a la versión 6
+## Actualización a la versión 6 (incluida en la 7)
 
 1. **Supabase › SQL Editor › New query:** pegar todo `supabase/migracion-v6.sql` → **Run**. Incluye las migraciones v4 y v5, así que basta con ejecutar este archivo. Conserva los valores de Ajustes y se puede ejecutar de nuevo sin errores.
 2. **En la app › Perfil › Ajustes:** enlaces de pago, contenido de la página de captación, descuento por referido, respuestas guardadas y parámetros de torneos.
