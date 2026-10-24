@@ -48,7 +48,7 @@ Dirección: https://samiro3014-svg.github.io/deuce-point/
 
 ## Actualización a la versión 6
 
-1. **Supabase › SQL Editor › New query:** pegar todo `supabase/migracion-v6.sql` → **Run**. Requiere la v5. Se puede ejecutar de nuevo sin errores.
+1. **Supabase › SQL Editor › New query:** pegar todo `supabase/migracion-v6.sql` → **Run**. Incluye las migraciones v4 y v5, así que basta con ejecutar este archivo. Conserva los valores de Ajustes y se puede ejecutar de nuevo sin errores.
 2. **En la app › Perfil › Ajustes:** enlaces de pago, contenido de la página de captación, descuento por referido, respuestas guardadas y parámetros de torneos.
 3. **Biblioteca › Lecciones:** «Cargar las 15 lecciones base».
 4. **Asistente (opcional):** la persona crea su cuenta en la app y se ejecuta en SQL Editor:
