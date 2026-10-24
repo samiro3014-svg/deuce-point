@@ -427,3 +427,14 @@ b.ok { color: #4d8a1c; } b.warnb { color: #9a5b00; } b.low { color: var(--brand)
 .card.pain.res { opacity: .7; }
 .rpe-card { border-left: 4px solid var(--accent); }
 .day-h > div > small { display: block; }
+
+/* ---------- v6: nutrición avanzada ---------- */
+ol.recipe { padding-left: 20px; margin: 6px 0; } ol.recipe li { margin: 6px 0; line-height: 1.45; }
+.shop .price-in { width: 86px; flex: none; margin: 0 0 0 6px; padding: 6px 8px; font-size: 13px; }
+.cyc, .memb-c { display: flex; flex-direction: column; gap: 4px; }
+.cyc { border-left: 4px solid #c25b8a; }
+.cyc .btn { align-self: flex-start; margin-top: 4px; }
+.card.supp { border-left: 4px solid var(--line); } .card.supp.on { border-left-color: var(--accent); }
+video.scan { width: 100%; max-height: 52vh; background: #0f2a44; border-radius: 10px; object-fit: cover; }
+ul.plain.ok li { padding-left: 16px; position: relative; margin: 4px 0; } ul.plain.ok li::before { content: '•'; position: absolute; left: 2px; color: var(--accent); font-weight: 700; }
+.shop input.price-in { width: 110px; height: auto; grid-row: auto; grid-column: 3; justify-self: end; accent-color: auto; margin: 2px 0 0; }

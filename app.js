@@ -66,7 +66,7 @@ function matchRow(row, o) {
 const CASCADE = {
   routines: [['routine_days', 'routine_id']], routine_days: [['routine_exercises', 'day_id']], workouts: [['workout_sets', 'workout_id']],
   nutrition_plans: [['plan_meals', 'plan_id']], plan_meals: [['plan_options', 'meal_id']], plan_options: [['plan_items', 'option_id']],
-  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id'], ['tennis_sessions', 'client_id'], ['wellness', 'client_id'], ['tournaments', 'client_id'], ['sweat_tests', 'client_id'], ['fitness_tests', 'client_id'], ['pain_reports', 'client_id']]
+  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id'], ['tennis_sessions', 'client_id'], ['wellness', 'client_id'], ['tournaments', 'client_id'], ['sweat_tests', 'client_id'], ['fitness_tests', 'client_id'], ['pain_reports', 'client_id'], ['anthropometry', 'client_id'], ['supplement_plans', 'client_id'], ['supplement_logs', 'client_id'], ['cycle_logs', 'client_id']]
 };
 const RESTRICT = { exercises: [['routine_exercises', 'exercise_id'], ['workout_sets', 'exercise_id']], foods: [['plan_items', 'food_id']] };
 function cascadeDelete(d, table, id) {
@@ -74,7 +74,7 @@ function cascadeDelete(d, table, id) {
     const e = new Error('No se puede eliminar: el elemento está en uso en planes, rutinas o registros.'); e.code = '23503'; throw e;
   }
   if (table === 'foods') (d.food_logs || []).forEach(l => { if (l.food_id === id) l.food_id = null; });
-  for (const [t, k] of CASCADE[table] || []) for (const r of (d[t] || []).filter(x => x[k] === id)) cascadeDelete(d, t, r.id);
+  for (const [t, k] of CASCADE[table] || []) { for (const r of (d[t] || []).filter(x => x[k] === id && x.id)) cascadeDelete(d, t, r.id); d[t] = (d[t] || []).filter(x => x[k] !== id); }
   d[table] = (d[table] || []).filter(x => x.id !== id);
 }
 
@@ -190,6 +190,7 @@ function buildDemoData() {
   if (window.buildNutritionDemo) buildNutritionDemo(d);
   if (window.buildAutoDemo) buildAutoDemo(d);
   if (window.buildTenisDemo) buildTenisDemo(d);
+  if (window.buildNutri2Demo) buildNutri2Demo(d);
   return d;
 }
 
@@ -306,7 +307,7 @@ function setActiveNav(name) {
   const coach = S.profile.role === 'coach';
   const map = coach
     ? { '': 'asesorados', asesorado: 'asesorados', rutina: 'asesorados', resumen: 'asesorados', diario: 'asesorados', 'plan-nutri': 'asesorados', 'plan-ver': 'asesorados', compras: 'asesorados', ajustes: 'asesorados', informe: 'asesorados', ejercicio: 'biblioteca', alimentos: 'biblioteca', alimento: 'biblioteca', videos: 'biblioteca' }
-    : { '': 'hoy', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', fotos: 'historial', rendimiento: 'historial', 'plan-ver': 'hoy', compras: 'hoy', checkin: 'hoy', valoracion: 'perfil', informe: 'perfil', informes: 'perfil', recordatorios: 'perfil' };
+    : { '': 'hoy', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', fotos: 'historial', rendimiento: 'historial', 'plan-ver': 'hoy', compras: 'hoy', checkin: 'hoy', suplementos: 'hoy', fuera: 'hoy', valoracion: 'perfil', informe: 'perfil', informes: 'perfil', recordatorios: 'perfil' };
   const key = map[name] ?? name;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.nav === key));
   const pill = document.getElementById('live-pill');
@@ -350,6 +351,8 @@ async function route() {
     if (name === 'fotos') return await vFotos();
     if (name === 'informe') return await vInforme(a, b, c);
     if (name === 'informes') return await vMisInformes();
+    if (name === 'suplementos') return await vSuplementos();
+    if (name === 'fuera') return await vFuera();
     if (name === 'recordatorios') return await vRecordatorios();
     if (name === 'entreno') return vEntreno();
     if (name === 'historial') return paint(progSeg('historial') + await historialHtml(S.profile.id), {}, 'Progreso');
@@ -387,7 +390,7 @@ function modal(html, h = {}) {
   w.oninput = h.input ? ev => h.input(ev.target) : null;
   w.onchange = h.change ? ev => h.change(ev.target) : null;
 }
-function closeModal() { const w = document.getElementById('modal'); if (!w) return; w.hidden = true; w.innerHTML = ''; document.body.classList.remove('noscroll'); }
+function closeModal() { if (typeof stopCamera === 'function') stopCamera(); const w = document.getElementById('modal'); if (!w) return; w.hidden = true; w.innerHTML = ''; document.body.classList.remove('noscroll'); }
 const modalHead = t => `<div class="modal-h"><h3>${esc(t)}</h3><button class="x" data-close aria-label="Cerrar">✕</button></div>`;
 
 /* ---------- gráficos de barras ---------- */
@@ -939,7 +942,7 @@ async function vAsesorado(id, tab, sub) {
   if (!c) return paint('<div class="card"><p>Asesorado no encontrado.</p></div>');
   const base = '#/asesorado/' + id;
   const mh = typeof membershipHead === 'function' ? await membershipHead(c) : { html: '', click: {} };
-  const tabs = `<div class="chips scroll tabs2">${[['valoracion', 'Valoración'], ['rutinas', 'Entreno'], ['nutricion', 'Nutrición'], ['seguimiento', 'Seguimiento'], ['checkins', 'Check-ins'], ['rendimiento', 'Rendimiento'], ['informes', 'Informes'], ['fotos', 'Fotos'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios']].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
+  const tabs = `<div class="chips scroll tabs2">${[['valoracion', 'Valoración'], ['rutinas', 'Entreno'], ['nutricion', 'Nutrición'], ['seguimiento', 'Seguimiento'], ['checkins', 'Check-ins'], ['rendimiento', 'Rendimiento'], ['antropometria', 'Antropometría'], ['suplementos', 'Suplementos'], ['informes', 'Informes'], ['fotos', 'Fotos'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios']].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
   const head = `<div class="card"><div class="day-h"><p class="small muted">${esc(c.email || '')}${c.phone ? ' · ' + esc(c.phone) : ''}</p>${waBtn(c.phone, `Hola ${firstName(c.full_name)}, `)}</div>
     <label class="field"><span>Objetivo del asesorado</span><textarea class="input" rows="2" data-goal placeholder="Ej.: Tenista juvenil · fuerza y potencia para la temporada">${esc(c.goal || '')}</textarea></label>
     ${mh.html}</div>`;
@@ -947,7 +950,7 @@ async function vAsesorado(id, tab, sub) {
   const handlers = { click: Object.assign({}, mh.click), change: async t => { if ('goal' in t.dataset) { await DB.update('profiles', id, { goal: t.value.trim() }); toast('Objetivo guardado'); } } };
 
   let after = null;
-  const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab, informes: typeof coachInformesTab === 'function' ? coachInformesTab : null, rendimiento: typeof rendimientoTab === 'function' ? (cid, s) => rendimientoTab(cid, s, base + '/rendimiento') : null };
+  const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab, informes: typeof coachInformesTab === 'function' ? coachInformesTab : null, rendimiento: typeof rendimientoTab === 'function' ? (cid, s) => rendimientoTab(cid, s, base + '/rendimiento') : null, antropometria: typeof antropometriaTab === 'function' ? antropometriaTab : null, suplementos: typeof suplementosTab === 'function' ? suplementosTab : null };
   if (tab === 'historial') body = await historialHtml(id);
   else if (MODS[tab]) {
     const r = await MODS[tab](id, sub);

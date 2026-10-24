@@ -209,13 +209,14 @@ function addFoodModal(o) {
         <div class="chips scroll">${['', ...FOOD_CATS].map(c => `<button class="chip${c === cat ? ' on' : ''}" data-act="cat" data-c="${esc(c)}">${esc(c || 'Todos')}</button>`).join('')}</div>
         <div id="af-list" class="pick-list tall">${foodListHtml(q, cat, 'sel')}</div>`;
     }
-    const tabs = o.planItemId ? '' : `<div class="seg"><button class="${mode === 'buscar' ? 'on' : ''}" data-act="mode" data-m="buscar">Buscar</button><button class="${mode === 'rapido' ? 'on' : ''}" data-act="mode" data-m="rapido">Registro rápido</button></div>`;
+    const tabs = o.planItemId ? '' : `<div class="seg"><button class="${mode === 'buscar' ? 'on' : ''}" data-act="mode" data-m="buscar">Buscar</button><button class="${mode === 'rapido' ? 'on' : ''}" data-act="mode" data-m="rapido">Registro rápido</button>${typeof barcodeModal === 'function' ? '<button data-act="scan">Escanear</button>' : ''}</div>`;
     modal(`${modalHead(o.planItemId ? 'Reemplazar por otro alimento' : 'Añadir a ' + o.meal.name)}${sel ? '' : tabs}${body}`, h);
   };
   const finish = async () => { closeModal(); toast('Registrado'); await o.after(); };
   const h = {
     click: {
       mode: el => { mode = el.dataset.m; draw(); },
+      scan: () => barcodeModal(o),
       cat: el => { cat = el.dataset.c; document.querySelectorAll('#modal [data-act=cat]').forEach(c => c.classList.toggle('on', c.dataset.c === cat)); $('#af-list').innerHTML = foodListHtml(q, cat, 'sel'); },
       sel: el => { sel = foodOf(el.dataset.id); draw(); },
       back: () => { sel = null; draw(); },
@@ -341,6 +342,8 @@ async function vHoy(date, cid) {
     <div class="mb-t"><div class="mb-f w" style="width:${Math.min(100, water / waterT * 100).toFixed(1)}%"></div></div>
     <div class="row-btns"><button class="btn sm" data-act="water" data-d="-250">− 250 ml</button><button class="btn sm primary" data-act="water" data-d="250">+ 250 ml</button><button class="btn sm" data-act="water" data-d="500">+ 500 ml</button></div></div>`;
   if (own && isToday && typeof wellnessCardHtml === 'function') html += await wellnessCardHtml();
+  if (own && isToday && typeof cycleCardHtml === 'function') html += await cycleCardHtml();
+  if (own && isToday && typeof supplementCardHtml === 'function') html += await supplementCardHtml().catch(() => '');
   if (own && isToday) html += await workoutCardHtml(cid);
   if (own && isToday && typeof checkinCardsHtml === 'function' && !S.needsMigration) html += await checkinCardsHtml(cid).catch(() => '');
   if (own && isToday && typeof clientMembershipCard === 'function') html += (await clientMembershipCard()) + (await clientReportCard());
@@ -382,17 +385,20 @@ async function vHoy(date, cid) {
       ${m.instructions ? `<p class="note">${esc(m.instructions)}</p>` : ''}
       ${opt ? opt.items.map(it => itemRow(it, m, mlogs.find(l => l.plan_item_id === it.id))).join('') : ''}
       ${extras.map(logRow).join('')}
-      <div class="row-btns">${pending ? `<button class="btn sm" data-act="all" data-meal="${mk}">Marcar todo</button>` : ''}<button class="btn sm" data-act="add" data-meal="${mk}">+ Añadir alimento</button></div>
+      <div class="row-btns">${pending ? `<button class="btn sm" data-act="all" data-meal="${mk}">Marcar todo</button>` : ''}<button class="btn sm" data-act="add" data-meal="${mk}">+ Añadir alimento</button>${opt && opt.items.length && typeof recipeModal === 'function' ? `<button class="btn sm" data-act="recipe" data-meal="${mk}">Preparación</button>` : ''}</div>
     </div>`;
   }).join('');
   const orphans = logs.filter(l => !used.has(l.id));
   if (orphans.length) html += `<div class="card meal"><div class="meal-h"><h3>Otros registros</h3></div>${orphans.map(logRow).join('')}</div>`;
-  if (plan) html += `<div class="row-btns"><a class="btn" href="#/plan-ver/${plan.id}">Ver plan completo</a><a class="btn" href="#/compras/${plan.id}">Lista de compras</a></div>`;
+  if (plan) html += `<div class="row-btns"><a class="btn" href="#/plan-ver/${plan.id}">Ver plan completo</a><a class="btn" href="#/compras/${plan.id}">Lista de compras</a>${own && typeof vFuera === 'function' ? '<a class="btn" href="#/fuera">Comer fuera de casa</a>' : ''}</div>`;
 
   paint(html, {
     click: {
       water: async el => { await upsertDaily(cid, date, { water_ml: Math.max(0, water + num(el.dataset.d)) }); rerender(); },
       ...(typeof wellnessHandlers === 'function' ? wellnessHandlers(rerender) : {}),
+      ...(typeof supplementHandlers === 'function' ? supplementHandlers(rerender) : {}),
+      ...(typeof cycleHandlers === 'function' ? cycleHandlers(rerender) : {}),
+      recipe: el => { const m = mealByKey[el.dataset.meal]; const o = m.options.find(x => x.id === choices[m.id]) || m.options[0]; if (o) recipeModal(o, rf); },
       dayT: async el => { await upsertDaily(cid, date, { choices: Object.assign({}, choices, { __day: el.dataset.v }) }); rerender(); },
       startWk: el => startWorkout(el.dataset.id),
       opt: async el => { await upsertDaily(cid, date, { choices: Object.assign({}, choices, { [el.dataset.meal]: el.dataset.opt }) }); rerender(); },
@@ -476,6 +482,7 @@ function planDocHtml(plan, client, logoSrc) {
       }
       h += `</tbody><tfoot><tr><td>Total</td><td></td>${cyc ? '<td></td>' : ''}<td></td><td class="n">${fmtInt(ot.kcal)}</td><td class="n">${fmtN(ot.protein)}</td><td class="n">${fmtN(ot.carbs)}</td><td class="n">${fmtN(ot.fat)}</td></tr></tfoot></table>`;
       if (repl.length) h += `<p class="small"><b>Opciones de reemplazo</b></p><ul class="doc-repl">${repl.join('')}</ul>`;
+      if (typeof recipeDocHtml === 'function') h += recipeDocHtml(o);
     }
   }
   h += `<p class="doc-foot">Los gramos corresponden al alimento en el estado indicado en su nombre (por ejemplo, «cocido»). Los reemplazos aportan la misma cantidad del nutriente principal del grupo (proteína, carbohidratos, grasa o energía). Documento elaborado por ${esc(BRAND.name)}.</p>`;
@@ -521,6 +528,7 @@ async function vCompras(id, days) {
   plan.meals.forEach(m => { const os = m.options.filter(o => o.items.length); os.forEach(o => o.items.forEach(i => { agg[i.food_id] = (agg[i.food_id] || 0) + num(i.grams) * days / os.length; })); });
   const key = 'dp_compras_' + id; let checked = {};
   try { checked = JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) { }
+  let total = 0, noPrice = 0; const coachShop = S.profile.role === 'coach';
   const qty = g => g >= 1000 ? (Math.round(g / 100) / 10).toLocaleString('es-CO') + ' kg' : Math.round(g / 5) * 5 + ' g';
   let html = `<div class="chips no-print">${[3, 7, 14].map(d => `<a class="chip${d === days ? ' on' : ''}" href="#/compras/${id}/${d}">${d} días</a>`).join('')}</div>
     <p class="small muted">${esc(plan.name)}. Cantidades para ${days} días, con rotación equitativa de las opciones de cada comida. Los alimentos que el plan indica cocidos se convierten a peso en crudo aproximado.</p>`;
@@ -531,12 +539,15 @@ async function vCompras(id, days) {
       const rf = /cocid/i.test(f.name) ? (RAW_FACTORS.find(([k]) => f.name.includes(k)) || [])[1] : null;
       const shown = rf ? g * rf : g;
       const name = rf ? f.name.replace(/\s*cocid[oa]s?/i, '') : f.name;
-      return `<label class="shop${checked[f.id] ? ' got' : ''}"><input type="checkbox" data-f="${f.id}" ${checked[f.id] ? 'checked' : ''}><span>${esc(name)}</span><b>${qty(shown)}</b><small>${rf ? 'en crudo' : esc(unitText(f, g))}</small></label>`;
+      const cost = num(f.price_kg) ? shown / 1000 * num(f.price_kg) : 0; total += cost; if (!num(f.price_kg)) noPrice++;
+      return `<label class="shop${checked[f.id] ? ' got' : ''}"><input type="checkbox" data-f="${f.id}" ${checked[f.id] ? 'checked' : ''}><span>${esc(name)}</span><b>${qty(shown)}</b><small>${rf ? 'en crudo' : esc(unitText(f, g))}${cost ? ' · $' + fmtInt(Math.round(cost / 100) * 100) : ''}</small>${coachShop && !S.needsV6 ? `<input class="input price-in" data-price="${f.id}" inputmode="numeric" value="${num(f.price_kg) || ''}" placeholder="$/kg" aria-label="Precio por kg">` : ''}</label>`;
     }).join('')}</div>`;
   }
+  if (total) html += `<div class="card"><h3>Costo estimado</h3><div class="stats3"><div><b>$${fmtInt(Math.round(total / 1000) * 1000)}</b><small>${days} días</small></div><div><b>$${fmtInt(Math.round(total / days / 100) * 100)}</b><small>Por día</small></div><div><b>$${fmtInt(Math.round(total * 30 / days / 1000) * 1000)}</b><small>Por mes</small></div></div><p class="small muted">Con los precios por kg registrados en Biblioteca › Alimentos${noPrice ? `; ${noPrice} alimentos sin precio no se incluyen` : ''}.</p></div>`;
+  else if (coachShop && !S.needsV6) html += `<p class="small muted">Escribe el precio por kg (o por litro) de cada alimento para calcular el costo del mercado.</p>`;
   html += `<div class="row-btns no-print"><button class="btn" data-act="print">Imprimir / PDF</button><button class="btn" data-act="clear">Desmarcar todo</button></div>`;
   paint(html, {
-    change: t => { if (t.dataset.f) { checked[t.dataset.f] = t.checked; try { localStorage.setItem(key, JSON.stringify(checked)); } catch (e) { } t.closest('.shop').classList.toggle('got', t.checked); } },
+    change: async t => { if (t.dataset.price) { const v = num(t.value) || null; await DB.update('foods', t.dataset.price, { price_kg: v }); S.foodById[t.dataset.price].price_kg = v; toast('Precio guardado'); return vCompras(id, days); } if (t.dataset.f) { checked[t.dataset.f] = t.checked; try { localStorage.setItem(key, JSON.stringify(checked)); } catch (e) { } t.closest('.shop').classList.toggle('got', t.checked); } },
     click: { print: () => window.print(), clear: () => { checked = {}; try { localStorage.removeItem(key); } catch (e) { } vCompras(id, days); } }
   }, 'Lista de compras');
 }
@@ -612,7 +623,7 @@ async function adherenceSection(cid, dayLink) {
 
 /* Pestañas de Progreso del asesorado */
 const progSeg = a => `<div class="chips scroll tabs2">${[['historial', 'Entrenamiento'], ['progreso', 'Ejercicios'], ['rendimiento', 'Rendimiento'], ['cuerpo', 'Cuerpo'], ['adherencia', 'Nutrición'], ['fotos', 'Fotos']].map(([k, l]) => `<a class="chip${a === k ? ' on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
-async function vCuerpo() { const b = await bodySection(S.profile.id); const pj = S.intake && S.intake.status === 'approved' && typeof projectionHtml === 'function' ? projectionHtml(S.intake.calc) : ''; paint(progSeg('cuerpo') + b.html + pj, { click: b.click }, 'Progreso'); }
+async function vCuerpo() { const b = await bodySection(S.profile.id); if (typeof antropometriaTab === 'function' && !S.needsV6) { const a = await antropometriaTab(S.profile.id); if ((await DB.select('anthropometry', { eq: { client_id: S.profile.id }, limit: 1 })).length) { b.html += '<h2 class="sec">Antropometría</h2>' + a.html; Object.assign(b.click, a.click); } } const pj = S.intake && S.intake.status === 'approved' && typeof projectionHtml === 'function' ? projectionHtml(S.intake.calc) : ''; paint(progSeg('cuerpo') + b.html + pj, { click: b.click }, 'Progreso'); }
 async function vAdherencia() { const a = await adherenceSection(S.profile.id, d => '#/hoy/' + d); paint(progSeg('adherencia') + a.html, {}, 'Progreso'); }
 
 /* =====================================================================
@@ -745,6 +756,7 @@ async function vPlanEditor(id) {
           <input class="input" data-tbl="plan_items" data-id="${it.id}" data-f="note" value="${esc(it.note || '')}" placeholder="Nota (opcional): preparación, marca…">
         </div>`; }).join('')}
         <p class="opt-tot small"><b>Total ${esc(sel.name)}:</b> ${macroLine(optionTotals(sel))}</p>
+        ${S.needsV6 || typeof recipeSteps !== 'function' ? '' : `<label class="field"><span>Preparación (una instrucción por línea; vacío = preparación automática)</span><textarea class="input" rows="3" data-tbl="plan_options" data-id="${sel.id}" data-f="recipe" placeholder="${esc(recipeSteps(Object.assign({}, sel, { recipe: '' })).join('\n'))}">${esc(sel.recipe || '')}</textarea></label>`}
       </div>` : ''}
       <button class="btn sm block" data-act="addItem" data-meal="${m.id}" data-opt="${sel ? sel.id : ''}" data-n="${sel ? sel.items.length : 0}">+ Añadir alimento</button>
       ${m.options.length > 1 ? `<p class="small muted">Promedio de la comida: ${macroLine(mav)}</p>` : ''}
@@ -875,7 +887,7 @@ function vAlimento(id) {
       <p class="small muted">Valores por 100 g. El grupo define con qué alimentos se calculan los reemplazos equivalentes.</p>
       <div class="rex-grid">${fld('kcal', 'kcal', f.kcal)}${fld('protein', 'Proteína g', f.protein)}${fld('carbs', 'Carbs g', f.carbs)}${fld('fat', 'Grasa g', f.fat)}</div>
       <p class="small muted" id="ff-chk"></p>
-      ${S.needsV5 || typeof foodMeta !== 'function' ? '' : (() => { const mt = isNew ? { cost: 2, uses: '' } : foodMeta(f); return `<div class="rex-grid"><label><span>Costo (generador de menús)</span><select class="input" name="cost_tier">${[1, 2, 3].map(c => `<option value="${c}"${c === mt.cost ? ' selected' : ''}>${COST_LBL[c]}</option>`).join('')}</select></label></div>
+      ${S.needsV5 || typeof foodMeta !== 'function' ? '' : (() => { const mt = isNew ? { cost: 2, uses: '' } : foodMeta(f); return `<div class="rex-grid">${S.needsV6 ? '' : fld('price_kg', 'Precio por kg o L ($)', f.price_kg)}<label><span>Costo (generador de menús)</span><select class="input" name="cost_tier">${[1, 2, 3].map(c => `<option value="${c}"${c === mt.cost ? ' selected' : ''}>${COST_LBL[c]}</option>`).join('')}</select></label></div>
       <div class="field"><span>Se usa en</span><div class="chips">${Object.entries(USE_LBL).map(([k, l]) => `<label class="chip"><input type="checkbox" name="mu_${k}" ${mt.uses.includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}</div></div>
       <p class="small muted">El generador de menús elige los alimentos según el presupuesto de cada asesorado y el tipo de comida. Sin marcar, se usa la clasificación por grupo.</p>`; })()}
       <div class="rex-grid three">${fld('fiber', 'Fibra g', f.fiber)}<label><span>Medida casera</span><input class="input" name="unit_name" value="${esc(f.unit_name || '')}" placeholder="unidad, taza…"></label>${fld('unit_grams', 'g por medida', f.unit_grams)}</div>
@@ -891,6 +903,7 @@ function vAlimento(id) {
     ev.preventDefault();
     const fd = Object.fromEntries(new FormData(ev.target));
     const rec = { name: fd.name.trim(), category: fd.category, kcal: num(fd.kcal), protein: num(fd.protein), carbs: num(fd.carbs), fat: num(fd.fat), fiber: num(fd.fiber), unit_name: fd.unit_name.trim() || null, unit_grams: num(fd.unit_grams) || null };
+    if (fd.price_kg !== undefined) rec.price_kg = num(fd.price_kg) || null;
     if (fd.cost_tier) { rec.cost_tier = num(fd.cost_tier); const mu = Object.keys(USE_LBL).filter(k => fd['mu_' + k]); rec.meal_use = mu.length ? mu : null; }
     if (!rec.name) return toast('Escribe el nombre', 'error');
     if (S.foods.some(x => norm(x.name) === norm(rec.name) && x.id !== id)) return toast('Ya existe un alimento con ese nombre', 'error');

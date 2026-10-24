@@ -331,12 +331,13 @@ function preventionModal(dayId, n, after) {
 const REND_TABS = [['carga', 'Carga'], ['partidos', 'Partidos'], ['torneos', 'Torneos'], ['hidratacion', 'Hidratación'], ['pruebas', 'Pruebas'], ['molestias', 'Molestias']];
 const V6_NOTICE = '<div class="card warn-box small"><b>Actualización pendiente de la base de datos.</b> Para activar esta sección, ejecuta <code>supabase/migracion-v6.sql</code> en Supabase › SQL Editor.</div>';
 async function rendimientoTab(cid, sub, base) {
-  sub = REND_TABS.some(x => x[0] === sub) ? sub : 'carga';
   const coach = S.profile.role !== 'client';
-  const nav = `<div class="chips scroll">${REND_TABS.map(([k, l]) => `<a class="chip${k === sub ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
-  if (S.needsV6) return { html: nav + V6_NOTICE, click: {} };
   const info = await clientInfo(cid);
-  const R = { carga: rendCarga, partidos: rendPartidos, torneos: rendTorneos, hidratacion: rendHidratacion, pruebas: rendPruebas, molestias: rendMolestias }[sub];
+  const tabs = REND_TABS.concat(typeof isFemale === 'function' && isFemale(info.d) ? [['ciclo', 'Ciclo']] : []);
+  sub = tabs.some(x => x[0] === sub) ? sub : 'carga';
+  const nav = `<div class="chips scroll">${tabs.map(([k, l]) => `<a class="chip${k === sub ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
+  if (S.needsV6) return { html: nav + V6_NOTICE, click: {} };
+  const R = { carga: rendCarga, partidos: rendPartidos, torneos: rendTorneos, hidratacion: rendHidratacion, pruebas: rendPruebas, molestias: rendMolestias, ciclo: typeof rendCiclo === 'function' ? rendCiclo : rendCarga }[sub];
   const r = await R(cid, info, coach);
   return { html: nav + r.html, click: r.click || {}, change: r.change, after: r.after };
 }
