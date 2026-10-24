@@ -27,7 +27,8 @@ function membStatus(m) {
 }
 function renewText(c, m) {
   const past = daysBetween(todayStr(), m.end_date) < 0;
-  return `Hola ${firstName(c.full_name)}, tu asesoría${m.plan_name ? ' ' + m.plan_name.toLowerCase() : ''} de ${BRAND.name} ${past ? 'venció' : 'vence'} el ${fmtDateLong(m.end_date)}. ¿Deseas renovarla para continuar con tu plan?`;
+  const link = typeof payLink === 'function' ? payLink(m.plan_name) : '';
+  return `Hola ${firstName(c.full_name)}, tu asesoría${m.plan_name ? ' ' + m.plan_name.toLowerCase() : ''} de ${BRAND.name} ${past ? 'venció' : 'vence'} el ${fmtDateLong(m.end_date)}. ¿Deseas renovarla para continuar con tu plan?${link ? ' Puedes pagar aquí: ' + link : ''}`;
 }
 async function saveMembership(cid, patch) {
   const ex = (await DB.select('memberships', { eq: { client_id: cid } }))[0];
@@ -43,6 +44,7 @@ function membershipModal(c, m, after) {
   modal(`${modalHead('Membresía · ' + (c.full_name || ''))}
     <label class="field"><span>Plan</span><select class="input" id="mb-plan">${MEMB_PLANS.map(([n, d]) => `<option value="${n}"${n === plan ? ' selected' : ''}>${n}${d ? ` · ${d} días` : ''}</option>`).join('')}</select></label>
     <div class="rex-grid"><label><span>Inicio</span><input class="input" type="date" id="mb-start" value="${esc(m.start_date || todayStr())}"></label><label><span>Vencimiento</span><input class="input" type="date" id="mb-end" value="${esc(m.end_date || addDays(todayStr(), days(plan)))}"></label></div>
+    ${S.needsV6 ? '' : `<label class="field"><span>Nivel de servicio</span><select class="input" id="mb-tier">${Object.entries(TIERS).map(([k, l]) => `<option value="${k}"${(m.tier || 'completo') === k ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`}
     <label class="field"><span>Valor (opcional)</span><input class="input" id="mb-amount" inputmode="numeric" value="${esc(m.amount ?? '')}" placeholder="Ej.: 180000"></label>
     <label class="field"><span>Notas</span><textarea class="input" id="mb-notes" rows="2" placeholder="Forma de pago, condiciones…">${esc(m.notes || '')}</textarea></label>
     <p class="small muted">El aviso de renovación aparece en Pendientes ${num(S.settings.renew_days ?? 7)} días antes del vencimiento (configurable en Ajustes). El asesorado ve la fecha de vencimiento en su pantalla Hoy durante esos días.</p>
@@ -56,11 +58,15 @@ function membershipModal(c, m, after) {
         const rec = { plan_name: $('#mb-plan').value, start_date: $('#mb-start').value || null, end_date: $('#mb-end').value || null, amount: $('#mb-amount').value.trim() === '' ? null : num($('#mb-amount').value), notes: $('#mb-notes').value.trim() || null };
         if (!rec.end_date) return toast('Indica la fecha de vencimiento', 'error');
         if (rec.start_date && rec.end_date < rec.start_date) return toast('El vencimiento debe ser posterior al inicio', 'error');
-        await saveMembership(c.id, rec); closeModal(); toast('Membresía guardada'); if (after) after();
+        if ($('#mb-tier')) rec.tier = $('#mb-tier').value;
+        await saveMembership(c.id, rec);
+        if (!m.end_date && rec.amount && typeof recordPayment === 'function') await recordPayment(c.id, rec.amount, rec.plan_name, rec.start_date); closeModal(); toast('Membresía guardada'); if (after) after();
       },
       renew: async () => {
         const n = $('#mb-plan').value; const d = days(n) || Math.max(1, daysBetween(m.start_date || todayStr(), m.end_date));
-        await saveMembership(c.id, { plan_name: n, start_date: renewStart, end_date: addDays(renewStart, d), amount: $('#mb-amount').value.trim() === '' ? null : num($('#mb-amount').value), notes: $('#mb-notes').value.trim() || null, archived: false });
+        const amt = $('#mb-amount').value.trim() === '' ? null : num($('#mb-amount').value);
+        await saveMembership(c.id, Object.assign({ plan_name: n, start_date: renewStart, end_date: addDays(renewStart, d), amount: amt, notes: $('#mb-notes').value.trim() || null, archived: false }, $('#mb-tier') ? { tier: $('#mb-tier').value } : {}));
+        if (amt && typeof recordPayment === 'function') await recordPayment(c.id, amt, 'Renovación ' + n.toLowerCase(), todayStr());
         closeModal(); toast('Membresía renovada hasta el ' + fmtDateLong(addDays(renewStart, d))); if (after) after();
       }
     }
@@ -125,7 +131,7 @@ async function clientMembershipCard() {
   try {
     const m = (await DB.select('memberships', { eq: { client_id: S.profile.id } }))[0]; const st = membStatus(m);
     if (!st || !(st.expired || st.soon)) return '';
-    return `<div class="card memb-c ${st.expired ? 'bad' : ''}"><b>${st.expired ? 'Tu asesoría venció el ' + esc(fmtDateLong(m.end_date)) : 'Tu asesoría vence el ' + esc(fmtDateLong(m.end_date))}</b><small class="muted">${st.expired ? 'Comunícate con tu entrenador para renovarla y continuar con el seguimiento.' : 'Renueva con tu entrenador para no interrumpir tu plan.'}</small>${waBtn(S.settings.whatsapp, `Hola, soy ${S.profile.full_name || ''}. Quiero renovar mi asesoría de ${BRAND.name}.`, 'Renovar por WhatsApp', 'btn sm')}</div>`;
+    return `<div class="card memb-c ${st.expired ? 'bad' : ''}"><b>${st.expired ? 'Tu asesoría venció el ' + esc(fmtDateLong(m.end_date)) : 'Tu asesoría vence el ' + esc(fmtDateLong(m.end_date))}</b><small class="muted">${st.expired ? 'Comunícate con tu entrenador para renovarla y continuar con el seguimiento.' : 'Renueva con tu entrenador para no interrumpir tu plan.'}</small><div class="row-btns">${typeof payLink === 'function' && payLink(m.plan_name) ? `<a class="btn sm primary" href="${esc(payLink(m.plan_name))}" target="_blank" rel="noopener">Pagar renovación</a>` : ''}${waBtn(S.settings.whatsapp, `Hola, soy ${S.profile.full_name || ''}. Quiero renovar mi asesoría de ${BRAND.name}.`, 'Renovar por WhatsApp', 'btn sm')}</div></div>`;
   } catch (e) { return ''; }
 }
 /* Filas de Pendientes: renovaciones e informes mensuales */
@@ -444,7 +450,7 @@ function loadRemPrefs(def) {
   p.meals = Object.assign({}, def.meals, Object.fromEntries(Object.entries(p.meals || {}).filter(([k]) => k in def.meals)));
   return Object.assign({}, def, p);
 }
-function saveRemPrefs(p) { try { localStorage.setItem(remKey(), JSON.stringify(p)); } catch (e) { } }
+function saveRemPrefs(p) { try { localStorage.setItem(remKey(), JSON.stringify(p)); } catch (e) { } clearTimeout(S.remSync); S.remSync = setTimeout(() => { if (typeof syncReminderPrefs === 'function') syncReminderPrefs(p); }, 800); }
 const icsEsc = s => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 function icsFold(line) {
   const enc = new TextEncoder(); const out = []; let cur = '', n = 0;
@@ -484,7 +490,7 @@ async function vRecordatorios() {
   const p = loadRemPrefs(def.prefs);
   const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const row = (k, label, time, extra = '') => `<div class="rem-row"><label class="check"><input type="checkbox" data-rk="${esc(k)}" ${(k.startsWith('meal:') ? p.meals[k.slice(5)].on : p[k].on) ? 'checked' : ''}> ${esc(label)}</label><input class="input time-in" type="time" data-rt="${esc(k)}" value="${esc(time)}">${extra}</div>`;
-  const draw = () => paint(`<a class="linkbtn" href="#/perfil">← Perfil</a>
+  const draw = () => { paint(`<a class="linkbtn" href="#/perfil">← Perfil</a><div id="push-box"></div>
     <p class="small muted">Los recordatorios se agregan al calendario de tu celular con alarma, de modo que suenan aunque la app esté cerrada. Configura los horarios y descarga el archivo.</p>
     <div class="card"><h3>Comidas</h3>${plan ? plan.meals.map(m => row('meal:' + m.name, m.name, p.meals[m.name] ? p.meals[m.name].time : '')).join('') : '<p class="small muted">Aún no tienes un plan nutricional activo.</p>'}
       <p class="small muted">Cada recordatorio incluye las opciones de menú con sus porciones.</p></div>
@@ -515,9 +521,12 @@ async function vRecordatorios() {
         else downloadFile(`Recordatorios ${BRAND.name}.ics`, r.text, 'text/calendar');
         toast(`${r.count} recordatorios generados`);
       },
-      icsFile: () => { const r = buildIcs(p, plan); if (!r.count) return toast('Activa al menos un recordatorio', 'error'); downloadFile(`Recordatorios ${BRAND.name}.ics`, r.text, 'text/calendar'); }
+      icsFile: () => { const r = buildIcs(p, plan); if (!r.count) return toast('Activa al menos un recordatorio', 'error'); downloadFile(`Recordatorios ${BRAND.name}.ics`, r.text, 'text/calendar'); },
+      ...(typeof pushHandlers === 'function' ? pushHandlers(() => { syncReminderPrefs(p); draw(); }) : {})
     }
   }, 'Recordatorios');
+    if (typeof pushCardHtml === 'function') pushCardHtml().then(h => { const b = $('#push-box'); if (b) b.innerHTML = h; });
+  };
   draw();
 }
 

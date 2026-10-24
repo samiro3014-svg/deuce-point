@@ -325,6 +325,7 @@ async function vHoy(date, cid) {
   const rerender = () => keepScroll(() => vHoy(date, cid));
 
   let html = '';
+  const nut = !own || typeof showsNutrition !== 'function' || showsNutrition();
   if (own && isToday) html += `<p class="muted hello">Hola, ${esc(firstName(S.profile.full_name))}</p>`;
   html += `<div class="datebar"><a class="icon-btn" href="${base}${addDays(date, -1)}" aria-label="Día anterior">‹</a><b>${isToday ? 'Hoy · ' + esc(fmtDayLong(date).toLowerCase()) : esc(fmtDayLong(date))}</b><a class="icon-btn" href="${base}${addDays(date, 1)}" aria-label="Día siguiente">›</a></div>`;
   if (dayType) html += `<div class="seg daytype">${dayOpts.map(([k, l]) => `<button class="${dayType === k ? 'on' : ''}" data-act="dayT" data-v="${k}">${l}</button>`).join('')}</div>
@@ -332,7 +333,7 @@ async function vHoy(date, cid) {
     ${tday && dayType === tday.type ? `<p class="small muted">${esc(tday.t.name)}: carbohidratos ${fmtInt(tday.carbs)} g (${fmtN(tday.gkg)} g/kg); las porciones de cereales, tubérculos y frutas ya están aumentadas. <a href="${own ? '#/rendimiento/torneos' : `#/asesorado/${cid}/rendimiento/torneos`}">Protocolo del día de partido</a></p>` : ''}`;
   if (tk.rows.length) html += `<p class="small muted">Tenis hoy: ${tk.rows.map(r => `${r.kind.toLowerCase()} de ${r.minutes} min`).join(', ')} · gasto estimado ${fmtInt(tk.gross)} kcal${tk.kcal ? ` · +${fmtInt(tk.kcal)} kcal sumadas al objetivo (70 % carbohidratos, 30 % grasa)${tk.assumed ? `; el plan ya incluye ${String(tk.assumed).replace('.', ',')} sesiones por semana` : ''}` : tday && dayType === tday.type ? ' · cubierto por la meta de carbohidratos del día de torneo' : ''}.</p>`;
   if (own && isToday && S.profile.goal) html += `<div class="goal"><small>Objetivo</small>${esc(S.profile.goal)}</div>`;
-  html += `<div class="card sum">
+  if (nut) html += `<div class="card sum">
     <div class="sum-top"><div><b>${fmtInt(tot.kcal)}</b><small>Consumidas</small></div>
     <div class="sum-mid"><b class="${left < 0 ? 'over' : ''}">${hasT ? fmtInt(Math.abs(left)) : '—'}</b><small>${left < 0 ? 'kcal por encima' : 'kcal restantes'}</small></div>
     <div><b>${hasT ? fmtInt(t.kcal) : '—'}</b><small>Objetivo</small></div></div>
@@ -346,11 +347,13 @@ async function vHoy(date, cid) {
   if (own && isToday && typeof wellnessCardHtml === 'function') html += await wellnessCardHtml();
   if (own && isToday && typeof cycleCardHtml === 'function') html += await cycleCardHtml();
   if (own && isToday && typeof supplementCardHtml === 'function') html += await supplementCardHtml().catch(() => '');
-  if (own && isToday) html += await workoutCardHtml(cid);
+  if (own && isToday && (typeof showsTraining !== 'function' || showsTraining())) html += await workoutCardHtml(cid);
+  if (own && isToday && typeof surveyCardHtml === 'function') html += await surveyCardHtml().catch(() => '');
   if (own && isToday && typeof checkinCardsHtml === 'function' && !S.needsMigration) html += await checkinCardsHtml(cid).catch(() => '');
   if (own && isToday && typeof clientMembershipCard === 'function') html += (await clientMembershipCard()) + (await clientReportCard());
 
-  if (!plan) html += `<div class="card empty"><p>${own ? (S.intake && S.intake.status === 'pending' ? 'Tu entrenador está revisando tu valoración y tu plan nutricional. Cuando lo apruebe aparecerá aquí.' : 'Tu entrenador todavía no te ha asignado un plan nutricional.') : 'Este asesorado no tiene un plan nutricional activo.'}</p><p class="small muted">Puedes registrar alimentos libremente en cada comida.</p></div>`;
+  if (!nut) html += '<div class="card empty"><p>Tu asesoría incluye el plan de entrenamiento. Puedes registrar el agua, los pasos y el bienestar diario.</p></div>';
+  else if (!plan) html += `<div class="card empty"><p>${own ? (S.intake && S.intake.status === 'pending' ? 'Tu entrenador está revisando tu valoración y tu plan nutricional. Cuando lo apruebe aparecerá aquí.' : 'Tu entrenador todavía no te ha asignado un plan nutricional.') : 'Este asesorado no tiene un plan nutricional activo.'}</p><p class="small muted">Puedes registrar alimentos libremente en cada comida.</p></div>`;
   const meals = plan ? plan.meals : DEFAULT_MEALS.map(([n, tl]) => ({ id: null, name: n, time_label: tl, options: [] }));
   const used = new Set(); const itemMap = {};
   const itemRow = (it0, meal, log) => {
@@ -370,7 +373,7 @@ async function vHoy(date, cid) {
   };
   const logRow = l => `<div class="fi done extra"><span class="chk">✓</span><div class="fi-b"><b>${esc(l.name)}</b><small>${l.grams ? fmtN(l.grams) + ' g · ' : ''}${macroLine(logM(l))}</small></div><button class="icon-btn danger" data-act="dellog" data-id="${l.id}" aria-label="Eliminar">✕</button></div>`;
   const mealByKey = {};
-  html += meals.map((m, mi) => {
+  if (nut) html += meals.map((m, mi) => {
     const mk = m.id || 'n' + mi; mealByKey[mk] = m;
     const mlogs = logs.filter(l => m.id ? l.meal_id === m.id : (!l.meal_id && l.meal_name === m.name));
     mlogs.forEach(l => used.add(l.id));
@@ -391,8 +394,8 @@ async function vHoy(date, cid) {
     </div>`;
   }).join('');
   const orphans = logs.filter(l => !used.has(l.id));
-  if (orphans.length) html += `<div class="card meal"><div class="meal-h"><h3>Otros registros</h3></div>${orphans.map(logRow).join('')}</div>`;
-  if (plan) html += `<div class="row-btns"><a class="btn" href="#/plan-ver/${plan.id}">Ver plan completo</a><a class="btn" href="#/compras/${plan.id}">Lista de compras</a>${own && typeof vFuera === 'function' ? '<a class="btn" href="#/fuera">Comer fuera de casa</a>' : ''}</div>`;
+  if (nut && orphans.length) html += `<div class="card meal"><div class="meal-h"><h3>Otros registros</h3></div>${orphans.map(logRow).join('')}</div>`;
+  if (nut && plan) html += `<div class="row-btns"><a class="btn" href="#/plan-ver/${plan.id}">Ver plan completo</a><a class="btn" href="#/compras/${plan.id}">Lista de compras</a>${own && typeof vFuera === 'function' ? '<a class="btn" href="#/fuera">Comer fuera de casa</a>' : ''}</div>`;
 
   paint(html, {
     change: async t => { if ('steps' in t.dataset) { await upsertDaily(cid, date, { steps: Math.max(0, Math.round(num(t.value))) }); toast('Pasos guardados'); } },

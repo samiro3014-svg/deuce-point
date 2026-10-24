@@ -14,7 +14,7 @@ const ACT_LVL = ['Sedentario', 'Leve', 'Moderado', 'Intenso'];
 const FA_SEX = { M: [1.3, 1.6, 1.7, 2.1], F: [1.3, 1.5, 1.6, 1.9] };
 const RELIABLE_COMP = ['InBody o bioimpedancia profesional', 'Pliegues cutáneos', 'DEXA', 'Evaluación del entrenador'];
 const COMP_METHODS = ['InBody o bioimpedancia profesional', 'Pliegues cutáneos', 'DEXA', 'Báscula casera', 'No sé'];
-const SETTINGS_DEF = { auto_publish: false, loss_rate_pct: 0.75, deficit_min: 300, deficit_max: 750, recomp_deficit: 250, surplus_beg: 500, surplus_int: 350, surplus_adv: 250, protein_gkg: 2, fat_gkg: 0.9, rest_carb_cut: 125, rest_carb_min_gkg: 2, peri_carb_pct: 60, cardio_z2: true, adapt_weeks: 4, menu_source: 'generador', menu_options: 3, renew_days: 7, match_carb_gkg: 7, pre_carb_gkg: 6, taper_days: 7, taper_pct: 60, sweat_na_mgl: 900, sweat_na_salty: 1500 };
+const SETTINGS_DEF = { auto_publish: false, loss_rate_pct: 0.75, deficit_min: 300, deficit_max: 750, recomp_deficit: 250, surplus_beg: 500, surplus_int: 350, surplus_adv: 250, protein_gkg: 2, fat_gkg: 0.9, rest_carb_cut: 125, rest_carb_min_gkg: 2, peri_carb_pct: 60, cardio_z2: true, adapt_weeks: 4, menu_source: 'generador', menu_options: 3, renew_days: 7, referral_pct: 10, match_carb_gkg: 7, pre_carb_gkg: 6, taper_days: 7, taper_pct: 60, sweat_na_mgl: 900, sweat_na_salty: 1500 };
 const DEFAULT_PLAN_NOTES = 'Pesar los alimentos en el estado indicado en el plan (cocido o crudo).\nDistribuir el agua indicada a lo largo del día.\nUsar la opción «Reemplazar» para cambiar un alimento por un equivalente del mismo grupo.';
 const DEFAULT_ROUTINE_NOTES = 'Calentamiento de 8 a 10 minutos: movilidad articular y 2 series de aproximación en el primer ejercicio.\nRIR: repeticiones que quedan en reserva al terminar la serie.\nProgresión: cuando completes el máximo de repeticiones en todas las series con el RIR indicado, aumenta la carga entre 2,5 y 5 %.';
 
@@ -602,6 +602,7 @@ function vOnboarding() {
 }
 async function submitIntake(d) {
   const cid = S.profile.id;
+  if (!d.ref && typeof storedRef === 'function' && storedRef()) d.ref = storedRef();
   document.body.classList.remove('onboarding');
   const t = computeTargets(d);
   const auto = !!S.settings.auto_publish && !blocking(t.flags);
@@ -1080,10 +1081,11 @@ async function inboxInner(clients) {
   if (typeof inboxManagementRows === 'function') rows.push(...await inboxManagementRows(byId, approved));
   if (typeof inboxTenisRows === 'function') rows.push(...await inboxTenisRows(byId));
   if (typeof inboxMessageRows === 'function') rows.push(...await inboxMessageRows(byId));
+  if (typeof inboxLeadRows === 'function') rows.push(...await inboxLeadRows());
   intakes.filter(i => byId[i.client_id]).forEach(i => rows.push(`<a class="ib-row" href="#/asesorado/${i.client_id}/valoracion"><span class="ib-tag v">Valoración</span><span class="ib-n">${esc(byId[i.client_id].full_name || byId[i.client_id].email)}</span><span class="ib-m">${(i.flags || []).filter(f => f.level !== 'info').length ? `<span class="warn">${(i.flags || []).filter(f => f.level !== 'info').length} alertas</span>` : 'Sin alertas'}</span></a>`));
   cks.filter(c => byId[c.client_id]).forEach(c => rows.push(`<a class="ib-row" href="#/asesorado/${c.client_id}/checkins"><span class="ib-tag c">Check-in</span><span class="ib-n">${esc(byId[c.client_id].full_name || '')}</span><span class="ib-m">${fmtDM(parseDay(c.check_date))}</span></a>`));
   inactive.forEach(c => rows.push(`<div class="ib-row"><span class="ib-tag i">Inactivo</span><a class="ib-n" href="#/asesorado/${c.id}/seguimiento">${esc(c.full_name || c.email)}</a><span class="ib-m">${lastAct[c.id] ? daysBetween(lastAct[c.id], todayStr()) + ' días' : 'sin registros'} ${waBtn(c.phone, `Hola ${firstName(c.full_name)}, ¿cómo vas con tu plan esta semana? Recuerda registrar tus comidas y entrenamientos en Deuce Point.`, 'WhatsApp', 'chip wa')}</span></div>`));
-  return `<div class="card inbox"><div class="day-h"><h3>Pendientes</h3><a class="btn sm" href="#/ajustes">Ajustes</a></div>
+  return `<div class="card inbox"><div class="day-h"><h3>Pendientes</h3>${isCoach() ? '<div class="row-btns"><a class="btn sm" href="#/negocio">Negocio</a><a class="btn sm" href="#/ajustes">Ajustes</a></div>' : ''}</div>
     ${rows.length ? rows.join('') : '<p class="small muted">Sin pendientes. Las valoraciones nuevas, los check-ins, las renovaciones, los informes mensuales y los asesorados sin registros durante 5 días aparecen aquí.</p>'}</div>${S.needsV5 && typeof V5_NOTICE === 'string' ? V5_NOTICE : ''}`;
 }
 
@@ -1133,15 +1135,25 @@ async function vAjustes() {
       <p class="small muted">Valores por defecto: 6 g/kg la víspera, 7 g/kg en días de torneo, 7 días de descarga con el 60 % de las series (40 % durante el torneo).</p>
       <h4>Hidratación</h4><div class="rex-grid">${n('sweat_na_mgl', 'Sodio en sudor mg/L')}${n('sweat_na_salty', 'Sudor salado mg/L')}</div></div>
     <div class="card"><h3>Membresías</h3><div class="rex-grid">${n('renew_days', 'Aviso de renovación (días antes)')}</div><p class="small muted">Las renovaciones próximas y vencidas aparecen en Pendientes con el mensaje de WhatsApp listo para enviar.</p></div>
+    <div class="card"><h3>Pagos y referidos</h3><p class="small muted">Enlaces de pago fijos creados en Wompi o Mercado Pago (link de pago). Se muestran al asesorado en el aviso de vencimiento y se agregan al mensaje de renovación.</p>
+      ${['Mensual', 'Trimestral', 'Semestral', 'Anual'].map(pl => `<label class="field"><span>Enlace de pago · ${pl}</span><input class="input" data-pl="${pl}" type="url" value="${esc((s.pay_links || {})[pl] || '')}" placeholder="https://…"></label>`).join('')}
+      <label class="field"><span>Enlace de pago general (otros planes)</span><input class="input" data-pl="default" type="url" value="${esc((s.pay_links || {}).default || '')}" placeholder="https://…"></label>
+      <div class="rex-grid">${n('referral_pct', 'Descuento por referido %')}</div></div>
+    <div class="card"><h3>Página de captación</h3><label class="field"><span>Título</span><input class="input" data-s="landing_title" value="${esc(s.landing_title || '')}" placeholder="Nutrición deportiva y entrenamiento"></label>
+      <label class="field"><span>Presentación</span><textarea class="input" rows="3" data-s="landing_intro" placeholder="Quién eres, a quién atiendes y cómo trabajas.">${esc(s.landing_intro || '')}</textarea></label>
+      <label class="field"><span>Servicios: uno por línea con el formato Nombre | Precio | Descripción</span><textarea class="input" rows="4" data-s="landing_services" placeholder="Nutrición | $150.000 / mes | Plan de alimentación y seguimiento semanal">${esc(s.landing_services || '')}</textarea></label>
+      <p class="small muted">Enlace y código QR en Negocio › Página y QR.</p></div>
+    ${typeof vapidCardHtml === 'function' ? await vapidCardHtml() : ''}
     <div class="card"><h3>Respuestas guardadas para mensajes</h3><label class="field"><span>Una respuesta por línea</span><textarea class="input" rows="4" data-s="quick_replies">${esc(s.quick_replies || '')}</textarea></label></div>
     <div class="card"><h3>Contacto</h3><label class="field"><span>Tu número de WhatsApp</span><input class="input" data-s="whatsapp" inputmode="tel" value="${esc(s.whatsapp || '')}" placeholder="3001234567"></label><p class="small muted">Se muestra a los asesorados para escribirte directamente.</p></div>
     ${typeof coachKeyCardHtml === 'function' ? await coachKeyCardHtml() : ''}`, {
     change: async t => {
+      if (t.dataset.pl) { const pl = Object.assign({}, S.settings.pay_links || {}, { [t.dataset.pl]: t.value.trim() }); await saveSettings({ pay_links: pl }); return toast('Guardado'); }
       const k = t.dataset.s; if (!k) return;
       const v = t.type === 'checkbox' ? t.checked : t.dataset.num ? (t.value.trim() === '' ? null : num(t.value)) : t.value.trim();
       await saveSettings({ [k]: v }); toast('Guardado');
     },
-    click: typeof coachKeyHandlers === 'function' ? coachKeyHandlers() : {}
+    click: Object.assign({}, typeof coachKeyHandlers === 'function' ? coachKeyHandlers() : {}, typeof vapidHandlers === 'object' ? vapidHandlers : {})
   }, 'Ajustes');
 }
 

@@ -66,7 +66,7 @@ function matchRow(row, o) {
 const CASCADE = {
   routines: [['routine_days', 'routine_id']], routine_days: [['routine_exercises', 'day_id']], workouts: [['workout_sets', 'workout_id']],
   nutrition_plans: [['plan_meals', 'plan_id']], plan_meals: [['plan_options', 'meal_id']], plan_options: [['plan_items', 'option_id']],
-  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id'], ['tennis_sessions', 'client_id'], ['wellness', 'client_id'], ['tournaments', 'client_id'], ['sweat_tests', 'client_id'], ['fitness_tests', 'client_id'], ['pain_reports', 'client_id'], ['anthropometry', 'client_id'], ['supplement_plans', 'client_id'], ['supplement_logs', 'client_id'], ['cycle_logs', 'client_id'], ['messages', 'client_id'], ['lesson_reads', 'client_id'], ['challenge_members', 'client_id']]
+  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id'], ['tennis_sessions', 'client_id'], ['wellness', 'client_id'], ['tournaments', 'client_id'], ['sweat_tests', 'client_id'], ['fitness_tests', 'client_id'], ['pain_reports', 'client_id'], ['anthropometry', 'client_id'], ['supplement_plans', 'client_id'], ['supplement_logs', 'client_id'], ['cycle_logs', 'client_id'], ['messages', 'client_id'], ['lesson_reads', 'client_id'], ['challenge_members', 'client_id'], ['payments', 'client_id'], ['surveys', 'client_id'], ['push_subscriptions', 'user_id'], ['reminder_prefs', 'user_id']]
 };
 const RESTRICT = { exercises: [['routine_exercises', 'exercise_id'], ['workout_sets', 'exercise_id']], foods: [['plan_items', 'food_id']] };
 function cascadeDelete(d, table, id) {
@@ -192,6 +192,7 @@ function buildDemoData() {
   if (window.buildTenisDemo) buildTenisDemo(d);
   if (window.buildNutri2Demo) buildNutri2Demo(d);
   if (window.buildComunidadDemo) buildComunidadDemo(d);
+  if (window.buildNegocioDemo) buildNegocioDemo(d);
   return d;
 }
 
@@ -261,6 +262,7 @@ async function afterAuth() {
     if (!p[0]) { renderNotice('No se encontró tu perfil. Verifica que el archivo schema.sql se ejecutó completo en Supabase.'); return; }
     S.profile = p[0];
     await Promise.all([loadExercises(), loadFoods(), loadSettings()]);
+    if (typeof loadTier === 'function') await loadTier();
     S.needsIntake = false; S.intake = null;
     if (S.profile.role === 'client' && !S.needsMigration) {
       S.intake = (await DB.select('intakes', { eq: { client_id: S.profile.id } }))[0] || null;
@@ -280,6 +282,8 @@ async function loadExercises() {
   S.exercises.sort((a, b) => a.name.localeCompare(b.name, 'es'));
   S.exById = Object.fromEntries(S.exercises.map(e => [e.id, e]));
 }
+const isStaff = () => !!S.profile && (S.profile.role === 'coach' || S.profile.role === 'assistant');
+const isCoach = () => !!S.profile && S.profile.role === 'coach';
 const exName = id => (S.exById[id] || {}).name || 'Ejercicio eliminado';
 const exGroup = id => (S.exById[id] || {}).muscle_group || 'Otro';
 
@@ -297,18 +301,19 @@ const ICON = {
 const svg = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${ICON[k]}</svg>`;
 
 function renderNav() {
-  const items = S.profile.role === 'coach'
+  const items = isCoach()
     ? [['asesorados', 'Asesorados', 'users'], ['plantillas', 'Plantillas', 'tpl'], ['biblioteca', 'Biblioteca', 'book'], ['perfil', 'Perfil', 'user']]
-    : [['hoy', 'Hoy', 'hoy'], ['plan', 'Entreno', 'dumb'], ['historial', 'Progreso', 'prog'], ['perfil', 'Perfil', 'user']];
+    : isStaff() ? [['asesorados', 'Asesorados', 'users'], ['perfil', 'Perfil', 'user']]
+    : [['hoy', 'Hoy', 'hoy'], ['plan', 'Entreno', 'dumb'], ['historial', 'Progreso', 'prog'], ['perfil', 'Perfil', 'user']].filter(x => x[0] !== 'plan' || typeof showsTraining !== 'function' || showsTraining());
   document.getElementById('nav').innerHTML = items.map(([k, l, i]) => `<a href="#/${k}" data-nav="${k}">${svg(i)}<span>${l}</span></a>`).join('');
   document.getElementById('demo-flag').hidden = !DEMO;
 }
 
 function setActiveNav(name) {
-  const coach = S.profile.role === 'coach';
+  const coach = isStaff();
   const map = coach
-    ? { '': 'asesorados', asesorado: 'asesorados', rutina: 'asesorados', resumen: 'asesorados', diario: 'asesorados', 'plan-nutri': 'asesorados', 'plan-ver': 'asesorados', compras: 'asesorados', ajustes: 'asesorados', informe: 'asesorados', retos: 'perfil', ejercicio: 'biblioteca', 'lecciones-admin': 'biblioteca', leccion: 'biblioteca', alimentos: 'biblioteca', alimento: 'biblioteca', videos: 'biblioteca' }
-    : { '': 'hoy', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', fotos: 'historial', rendimiento: 'historial', 'plan-ver': 'hoy', compras: 'hoy', checkin: 'hoy', suplementos: 'hoy', fuera: 'hoy', mensajes: 'hoy', retos: 'hoy', logros: 'historial', lecciones: 'perfil', leccion: 'perfil', valoracion: 'perfil', informe: 'perfil', informes: 'perfil', recordatorios: 'perfil' };
+    ? { '': 'asesorados', asesorado: 'asesorados', rutina: 'asesorados', resumen: 'asesorados', diario: 'asesorados', 'plan-nutri': 'asesorados', 'plan-ver': 'asesorados', compras: 'asesorados', ajustes: 'asesorados', informe: 'asesorados', negocio: 'asesorados', retos: 'perfil', ejercicio: 'biblioteca', 'lecciones-admin': 'biblioteca', leccion: 'biblioteca', alimentos: 'biblioteca', alimento: 'biblioteca', videos: 'biblioteca' }
+    : { '': 'hoy', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', fotos: 'historial', rendimiento: 'historial', 'plan-ver': 'hoy', compras: 'hoy', checkin: 'hoy', suplementos: 'hoy', fuera: 'hoy', mensajes: 'hoy', retos: 'hoy', logros: 'historial', lecciones: 'perfil', leccion: 'perfil', valoracion: 'perfil', informe: 'perfil', informes: 'perfil', recordatorios: 'perfil', encuesta: 'hoy' };
   const key = map[name] ?? name;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.nav === key));
   const pill = document.getElementById('live-pill');
@@ -324,9 +329,11 @@ async function route() {
   setActiveNav(name);
   window.scrollTo(0, 0);
   view().innerHTML = '<div class="loading"><span></span><span></span><span></span></div>';
-  const coach = S.profile.role === 'coach';
+  const coach = isStaff();
   try {
     if (coach) {
+      if (!isCoach() && ['ajustes', 'negocio', 'plantillas', 'biblioteca', 'ejercicio', 'alimentos', 'alimento', 'videos', 'rutina', 'plan-nutri', 'lecciones-admin'].includes(name)) return paint('<div class="card"><p>Esta sección está disponible solo para el entrenador.</p><a class="btn" href="#/asesorados">Volver</a></div>');
+      if (name === 'negocio') return await vNegocio(a);
       if (name === 'asesorado') return await vAsesorado(a, b || 'rutinas', c);
       if (name === 'rutina') return await vRutina(a);
       if (name === 'plantillas') return await vPlantillas();
@@ -357,6 +364,7 @@ async function route() {
     if (name === 'informes') return await vMisInformes();
     if (name === 'suplementos') return await vSuplementos();
     if (name === 'mensajes') return await vMensajes();
+    if (name === 'encuesta') return vEncuesta();
     if (name === 'logros') return await vLogros();
     if (name === 'lecciones') return await vLecciones();
     if (name === 'leccion') return await vLeccion(a);
@@ -428,7 +436,9 @@ function renderLogin() {
       <button class="btn primary block" data-demo="demo-coach">Entrar como entrenador</button>
       <button class="btn block" data-demo="demo-ana">Entrar como asesorada (Ana)</button>
       <button class="btn block" data-demo="demo-juan">Entrar como asesorado (Juan)</button>
-      <button class="btn block" data-demo="demo-laura">Entrar como asesorada nueva (Laura · valoración inicial)</button></div></div>`;
+      <button class="btn block" data-demo="demo-laura">Entrar como asesorada nueva (Laura · valoración inicial)</button>
+      <button class="btn block" data-demo="demo-asis">Entrar como asistente</button>
+      <a class="btn block" href="inicio.html">Ver la página de captación</a></div></div>`;
     applyBrand();
     m.onclick = ev => { const b = ev.target.closest('[data-demo]'); if (b) { localStorage.setItem('ent_demo_user', b.dataset.demo); afterAuth(); } };
     m.oninput = m.onchange = null;
@@ -766,7 +776,7 @@ async function vResumen(id) {
   const exIds = [...new Set(sets.map(s => s.exercise_id))];
   const prior = (await DB.select('workout_sets', { eq: { client_id: w.client_id }, inn: { exercise_id: exIds }, order: 'created_at', asc: false, limit: 1000 })).filter(s => s.workout_id !== id && s.created_at < (sets[0] ? sets[0].created_at : w.finished_at));
   let client = null;
-  if (S.profile.role === 'coach') client = (await DB.select('profiles', { eq: { id: w.client_id } }))[0];
+  if (isStaff()) client = (await DB.select('profiles', { eq: { id: w.client_id } }))[0];
 
   const vol = sets.reduce((a, s) => a + num(s.weight_kg) * s.reps, 0);
   const reps = sets.reduce((a, s) => a + s.reps, 0);
@@ -800,11 +810,11 @@ async function vResumen(id) {
     <div class="card"><h3>Series por grupo muscular</h3>${hbars(Object.entries(byMuscle).sort((a, b) => b[1].sets - a[1].sets).map(([g, v]) => ({ label: g, value: v.sets, text: v.sets + ' series' })))}</div>
     ${w.notes ? `<div class="card"><h3>Notas</h3><p class="pre">${esc(w.notes)}</p></div>` : ''}
     ${exCards}
-    <div class="row-btns"><button class="btn" data-act="back">Volver</button>${S.profile.role === 'coach' || w.client_id === S.profile.id ? '<button class="btn danger-outline" data-act="del">Eliminar sesión</button>' : ''}</div>`;
+    <div class="row-btns"><button class="btn" data-act="back">Volver</button>${isCoach() || w.client_id === S.profile.id ? '<button class="btn danger-outline" data-act="del">Eliminar sesión</button>' : ''}</div>`;
   paint(html, {
     click: {
       rpe: el => rpeHandler(w)(el),
-      back: () => { if (S.profile.role === 'coach') location.hash = '#/asesorado/' + w.client_id + '/historial'; else location.hash = '#/historial'; },
+      back: () => { if (isStaff()) location.hash = '#/asesorado/' + w.client_id + '/historial'; else location.hash = '#/historial'; },
       del: async () => { if (!confirm('¿Eliminar esta sesión y todas sus series? Esta acción no se puede deshacer.')) return; await DB.remove('workouts', id); toast('Sesión eliminada'); history.back(); }
     }
   }, 'Resumen de la sesión');
@@ -894,7 +904,7 @@ function vPerfil() {
       <label class="field"><span>Nombre</span><input class="input" data-f="full_name" value="${esc(p.full_name || '')}"></label>
       <label class="field"><span>Correo</span><input class="input" value="${esc(p.email || '')}" disabled></label>
       <label class="field"><span>WhatsApp</span><input class="input" data-f="phone" inputmode="tel" value="${esc(p.phone || '')}" placeholder="3001234567"></label>
-      <p class="small muted">Rol: ${p.role === 'coach' ? 'Entrenador' : 'Asesorado'}</p>
+      <p class="small muted">Rol: ${p.role === 'coach' ? 'Entrenador' : p.role === 'assistant' ? 'Asistente' : 'Asesorado'}</p>
     </div>
     ${client ? `<a class="card row-link" href="#/valoracion"><div><b>Mi valoración inicial</b><small class="muted">Ver o descargar en PDF y HTML</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/checkin"><div><b>Check-in semanal</b><small class="muted">Peso, cumplimiento y sensaciones de la semana</small></div><span class="chev">›</span></a>
@@ -902,10 +912,14 @@ function vPerfil() {
       <a class="card row-link" href="#/mensajes"><div><b>Mensajes</b><small class="muted">Conversación con tu entrenador</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/lecciones"><div><b>Lecciones</b><small class="muted">Una lección de nutrición y entrenamiento cada semana</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/retos"><div><b>Retos</b><small class="muted">Retos grupales y tabla de posiciones</small></div><span class="chev">›</span></a>
+      <a class="card row-link" href="#/recordatorios"><div><b>Recordatorios y notificaciones</b><small class="muted">Calendario del celular y notificaciones push</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/informes"><div><b>Informes mensuales</b><small class="muted">Tu progreso del mes en PDF y HTML</small></div><span class="chev">›</span></a>
-      <a class="card row-link" href="#/recordatorios"><div><b>Recordatorios en el celular</b><small class="muted">Comidas, agua, entrenamiento y check-in en tu calendario</small></div><span class="chev">›</span></a>
+      <div id="perfil-extra"></div>
+      <button class="btn block" data-act="xlsMe">Descargar mis datos (Excel)</button>
       ${waBtn(S.settings.whatsapp, `Hola, soy ${p.full_name || ''}, asesorado de ${BRAND.name}.`, 'Escribir a mi entrenador por WhatsApp', 'btn block')}`
-      : `<a class="card row-link" href="#/ajustes"><div><b>Ajustes de automatización</b><small class="muted">Publicación de planes, cálculos, plantillas, WhatsApp y fotos</small></div><span class="chev">›</span></a>
+      : !isCoach() ? '<div id="perfil-extra"></div>' : `<a class="card row-link" href="#/negocio"><div><b>Panel de negocio</b><small class="muted">Ingresos, renovaciones, prospectos, referidos, encuestas y página de captación</small></div><span class="chev">›</span></a>
+      <div id="perfil-extra"></div>
+      <a class="card row-link" href="#/ajustes"><div><b>Ajustes de automatización</b><small class="muted">Publicación de planes, cálculos, plantillas, WhatsApp y fotos</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/retos"><div><b>Retos grupales</b><small class="muted">Crear retos de pasos, agua, registro o entrenamiento</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/lecciones-admin"><div><b>Lecciones semanales</b><small class="muted">Contenido educativo para los asesorados</small></div><span class="chev">›</span></a>`}
     ${DEMO ? '<button class="btn block" data-act="reset">Restablecer datos de demostración</button>' : ''}
@@ -914,9 +928,13 @@ function vPerfil() {
     change: async t => { if (t.dataset.f) { await DB.update('profiles', p.id, { [t.dataset.f]: t.value.trim() }); S.profile[t.dataset.f] = t.value.trim(); toast('Guardado'); } },
     click: {
       out: async () => { await Auth.signOut(); S.profile = null; location.hash = ''; afterAuth(); },
+      xlsMe: async el => { el.disabled = true; try { await exportClientXlsx(p.id); } finally { el.disabled = false; } },
+      ...(typeof referralHandlers === 'object' ? referralHandlers : {}),
+      ...(typeof pushHandlers === 'function' ? pushHandlers(() => route()) : {}),
       reset: () => { if (!confirm('¿Restablecer todos los datos de demostración?')) return; localStorage.removeItem(DEMO_KEY); Object.keys(localStorage).filter(k => /^(ent_draft_|dp_)/.test(k)).forEach(k => localStorage.removeItem(k)); demoData = null; location.reload(); }
     }
   }, 'Perfil');
+  (async () => { const box = document.getElementById('perfil-extra'); if (!box) return; let h = ''; if (client) h += (typeof myMembershipCardHtml === 'function' ? await myMembershipCardHtml().catch(() => '') : '') + (typeof referralCardHtml === 'function' ? referralCardHtml() : ''); else if (typeof pushCardHtml === 'function') h += await pushCardHtml(); box.innerHTML = h; })();
 }
 
 /* =====================================================================
@@ -960,7 +978,8 @@ async function vAsesorado(id, tab, sub) {
   const c = (await DB.select('profiles', { eq: { id } }))[0];
   if (!c) return paint('<div class="card"><p>Asesorado no encontrado.</p></div>');
   const base = '#/asesorado/' + id;
-  const mh = typeof membershipHead === 'function' ? await membershipHead(c) : { html: '', click: {} };
+  const mh = typeof membershipHead === 'function' && isCoach() ? await membershipHead(c) : { html: '', click: {} };
+  if (typeof exportClientXlsx === 'function') { mh.html += `<div class="row-btns"><button class="btn sm" data-act="xlsC">Exportar ficha a Excel</button></div>`; mh.click.xlsC = async el => { el.disabled = true; try { await exportClientXlsx(c.id); } finally { el.disabled = false; } }; }
   const tabs = `<div class="chips scroll tabs2">${[['valoracion', 'Valoración'], ['rutinas', 'Entreno'], ['nutricion', 'Nutrición'], ['seguimiento', 'Seguimiento'], ['mensajes', 'Mensajes'], ['checkins', 'Check-ins'], ['rendimiento', 'Rendimiento'], ['antropometria', 'Antropometría'], ['suplementos', 'Suplementos'], ['informes', 'Informes'], ['fotos', 'Fotos'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios']].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
   const head = `<div class="card"><div class="day-h"><p class="small muted">${esc(c.email || '')}${c.phone ? ' · ' + esc(c.phone) : ''}</p>${waBtn(c.phone, `Hola ${firstName(c.full_name)}, `)}</div>
     <label class="field"><span>Objetivo del asesorado</span><textarea class="input" rows="2" data-goal placeholder="Ej.: Tenista juvenil · fuerza y potencia para la temporada">${esc(c.goal || '')}</textarea></label>
