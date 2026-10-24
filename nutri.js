@@ -332,6 +332,7 @@ async function vHoy(date, cid) {
     <div class="row-btns"><button class="btn sm" data-act="water" data-d="-250">− 250 ml</button><button class="btn sm primary" data-act="water" data-d="250">+ 250 ml</button><button class="btn sm" data-act="water" data-d="500">+ 500 ml</button></div></div>`;
   if (own && isToday) html += await workoutCardHtml(cid);
   if (own && isToday && typeof checkinCardsHtml === 'function' && !S.needsMigration) html += await checkinCardsHtml(cid).catch(() => '');
+  if (own && isToday && typeof clientMembershipCard === 'function') html += (await clientMembershipCard()) + (await clientReportCard());
 
   if (!plan) html += `<div class="card empty"><p>${own ? (S.intake && S.intake.status === 'pending' ? 'Tu entrenador está revisando tu valoración y tu plan nutricional. Cuando lo apruebe aparecerá aquí.' : 'Tu entrenador todavía no te ha asignado un plan nutricional.') : 'Este asesorado no tiene un plan nutricional activo.'}</p><p class="small muted">Puedes registrar alimentos libremente en cada comida.</p></div>`;
   const meals = plan ? plan.meals : DEFAULT_MEALS.map(([n, tl]) => ({ id: null, name: n, time_label: tl, options: [] }));
@@ -716,7 +717,7 @@ async function vPlanEditor(id) {
         <button class="icon-btn" data-act="mvMeal" data-id="${m.id}" data-dir="1" ${mi === plan.meals.length - 1 ? 'disabled' : ''} aria-label="Bajar">↓</button>
         <button class="icon-btn danger" data-act="delMeal" data-id="${m.id}" aria-label="Eliminar comida">✕</button></div>
       <textarea class="input" rows="2" data-tbl="plan_meals" data-id="${m.id}" data-f="instructions" placeholder="Instrucciones de la comida">${esc(m.instructions || '')}</textarea>
-      <div class="chips">${m.options.map(o => `<button class="chip${o === sel ? ' on' : ''}" data-act="selOpt" data-meal="${m.id}" data-id="${o.id}">${esc(o.name)} · ${fmtInt(optionTotals(o).kcal)}</button>`).join('')}<button class="chip add" data-act="addOpt" data-meal="${m.id}" data-n="${m.options.length}">+ Opción</button></div>
+      <div class="chips">${m.options.map(o => `<button class="chip${o === sel ? ' on' : ''}" data-act="selOpt" data-meal="${m.id}" data-id="${o.id}">${esc(o.name)} · ${fmtInt(optionTotals(o).kcal)}</button>`).join('')}<button class="chip add" data-act="addOpt" data-meal="${m.id}" data-n="${m.options.length}">+ Opción</button>${typeof autoOptionFor === 'function' ? `<button class="chip add" data-act="autoOpt" data-meal="${m.id}" data-n="${m.options.length}">+ Opción automática</button>` : ''}</div>
       ${sel ? `<div class="opt-ed">
         <div class="day-ed-h"><input class="input" data-tbl="plan_options" data-id="${sel.id}" data-f="name" value="${esc(sel.name)}" aria-label="Nombre de la opción">
           <button class="icon-btn" data-act="dupOpt" data-id="${sel.id}" data-meal="${m.id}" data-n="${m.options.length}" aria-label="Duplicar opción">⧉</button>
@@ -772,6 +773,13 @@ async function vPlanEditor(id) {
       },
       selOpt: el => { S.editOpt[el.dataset.meal] = el.dataset.id; rerender(); },
       addOpt: async el => { const [o] = await DB.insert('plan_options', { meal_id: el.dataset.meal, name: 'Opción ' + (+el.dataset.n + 1), position: +el.dataset.n }); S.editOpt[el.dataset.meal] = o.id; rerender(); },
+      autoOpt: async el => {
+        const meal = plan.meals.find(x => x.id === el.dataset.meal); el.disabled = true;
+        const o = await autoOptionFor(plan, meal);
+        const [no] = await DB.insert('plan_options', { meal_id: meal.id, name: o.name, position: +el.dataset.n });
+        await DB.insert('plan_items', o.items.map((i, ii) => ({ option_id: no.id, food_id: i.food_id, grams: i.grams, position: ii, note: i.note || '' })));
+        S.editOpt[meal.id] = no.id; toast('Opción generada con las mismas metas de la comida'); rerender();
+      },
       dupOpt: async el => {
         const src = findOpt(el.dataset.id);
         const [o] = await DB.insert('plan_options', { meal_id: el.dataset.meal, name: 'Opción ' + (+el.dataset.n + 1), position: +el.dataset.n });
@@ -855,6 +863,9 @@ function vAlimento(id) {
       <p class="small muted">Valores por 100 g. El grupo define con qué alimentos se calculan los reemplazos equivalentes.</p>
       <div class="rex-grid">${fld('kcal', 'kcal', f.kcal)}${fld('protein', 'Proteína g', f.protein)}${fld('carbs', 'Carbs g', f.carbs)}${fld('fat', 'Grasa g', f.fat)}</div>
       <p class="small muted" id="ff-chk"></p>
+      ${S.needsV5 || typeof foodMeta !== 'function' ? '' : (() => { const mt = isNew ? { cost: 2, uses: '' } : foodMeta(f); return `<div class="rex-grid"><label><span>Costo (generador de menús)</span><select class="input" name="cost_tier">${[1, 2, 3].map(c => `<option value="${c}"${c === mt.cost ? ' selected' : ''}>${COST_LBL[c]}</option>`).join('')}</select></label></div>
+      <div class="field"><span>Se usa en</span><div class="chips">${Object.entries(USE_LBL).map(([k, l]) => `<label class="chip"><input type="checkbox" name="mu_${k}" ${mt.uses.includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}</div></div>
+      <p class="small muted">El generador de menús elige los alimentos según el presupuesto de cada asesorado y el tipo de comida. Sin marcar, se usa la clasificación por grupo.</p>`; })()}
       <div class="rex-grid three">${fld('fiber', 'Fibra g', f.fiber)}<label><span>Medida casera</span><input class="input" name="unit_name" value="${esc(f.unit_name || '')}" placeholder="unidad, taza…"></label>${fld('unit_grams', 'g por medida', f.unit_grams)}</div>
       <button class="btn primary block" type="submit">${isNew ? 'Crear alimento' : 'Guardar cambios'}</button>
     </form>
@@ -868,6 +879,7 @@ function vAlimento(id) {
     ev.preventDefault();
     const fd = Object.fromEntries(new FormData(ev.target));
     const rec = { name: fd.name.trim(), category: fd.category, kcal: num(fd.kcal), protein: num(fd.protein), carbs: num(fd.carbs), fat: num(fd.fat), fiber: num(fd.fiber), unit_name: fd.unit_name.trim() || null, unit_grams: num(fd.unit_grams) || null };
+    if (fd.cost_tier) { rec.cost_tier = num(fd.cost_tier); const mu = Object.keys(USE_LBL).filter(k => fd['mu_' + k]); rec.meal_use = mu.length ? mu : null; }
     if (!rec.name) return toast('Escribe el nombre', 'error');
     if (S.foods.some(x => norm(x.name) === norm(rec.name) && x.id !== id)) return toast('Ya existe un alimento con ese nombre', 'error');
     safe(async () => {

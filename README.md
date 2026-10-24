@@ -6,6 +6,15 @@ Dirección: https://samiro3014-svg.github.io/deuce-point/
 
 ---
 
+## Novedades de la versión 5
+
+- **Generador de menús propios.** Cada comida se arma con alimentos de la base según su estructura (desayuno, refrigerio, almuerzo, cena), los alimentos preferidos, el presupuesto (ajustado, moderado, amplio), las exclusiones y el momento del día con más hambre (más proteína en esa comida). Los horarios salen de la hora de despertar y de acostarse. Las porciones de cada opción se calculan para cumplir la proteína, los carbohidratos y la grasa de esa comida, con el 60 % de los carbohidratos en las comidas pre y post entreno. Por defecto, 3 opciones por comida y proteínas distintas entre opciones y entre almuerzo y cena. Si el promedio del día se aleja más de 8 % de algún macronutriente, aparece «Revisar porciones» en la valoración. En el editor del plan, **+ Opción automática** agrega una opción nueva con las mismas metas de la comida. En **Biblioteca › Alimentos** se define el costo y el uso (desayuno, refrigerios, almuerzo y cena) de cada alimento. En **Ajustes** se elige entre «Generador personalizado» y «Plantilla asignada al objetivo».
+- **Informe mensual (PDF y HTML).** Ficha del asesorado › **Informes**: periodo (últimos 30 días, mes anterior, mes actual o fechas), comentarios y objetivos del próximo mes. Incluye peso y composición, proyección frente al resultado, cumplimiento del plan, macronutrientes frente al objetivo, agua, sesiones y volumen por semana, mejoras de fuerza (1RM estimado) y bienestar de los check-ins, todo en gráficos de barras. El asesorado lo ve en **Perfil › Informes mensuales** y recibe un aviso en Hoy. Pendientes muestra «Informe» cada 30 días.
+- **Recordatorios en el celular.** Perfil › **Recordatorios**: comidas (con las opciones del menú y sus porciones), agua, entrenamiento (30 minutos antes), check-in semanal y registro del día. Se descargan como archivo de calendario (.ics) con alarma; suenan aunque la app esté cerrada (iPhone y Android).
+- **Membresías.** En la ficha del asesorado: plan (mensual, trimestral, semestral, anual o personalizado), inicio, vencimiento, valor y notas; botón de renovación. Pendientes muestra «Renovación» desde 7 días antes (configurable en Ajustes) con el mensaje de WhatsApp listo. El asesorado ve el aviso en Hoy.
+- **Archivar y eliminar asesorados.** «Archivar» oculta al asesorado de la lista y de Pendientes y conserva sus datos (filtro «Archivados» para restaurarlo). «Eliminar» borra de forma definitiva la cuenta, todos sus registros y los archivos de sus fotos; pide escribir ELIMINAR.
+- **Videos de técnica.** Biblioteca › **Videos de técnica**: lista de ejercicios sin video, botón «Buscar» en YouTube y campo para pegar el enlace (YouTube, Shorts o Vimeo). El video se reproduce dentro de la app en la información del ejercicio y con el botón «▶ Técnica» durante la sesión.
+
 ## Motor de cálculo (v4)
 
 - **TMB:** Katch-McArdle (370 + 21,6 × masa libre de grasa) o Cunningham para deportistas (500 + 22 × masa libre de grasa) cuando la composición corporal proviene de InBody, pliegues, DEXA o la evaluación del entrenador. En otro caso, Mifflin-St Jeor (10 × peso + 6,25 × talla − 4,92 × edad + 5 / −161).
@@ -59,9 +68,13 @@ PAR-Q con alguna respuesta «Sí» (se le indica al asesorado buscar autorizaci�
 
 ---
 
-## Actualización a la versión 4 (una sola vez)
+## Actualización a la versión 5 (una sola vez)
 
-Supabase › SQL Editor › New query: pegar todo `supabase/migracion-v4.sql` → **Run**. Conserva los valores que ya tengas en Ajustes.
+Supabase › SQL Editor › New query: pegar todo `supabase/migracion-v5.sql` → **Run**. Incluye la migración v4, así que no es necesario ejecutar la v4 por separado. Conserva los valores que ya tengas en Ajustes y se puede ejecutar de nuevo sin errores.
+
+## Actualización a la versión 4
+
+Incluida en `migracion-v5.sql`. Archivo independiente: `supabase/migracion-v4.sql`.
 
 ## Actualización a la versión 3 (ya realizada)
 
@@ -91,9 +104,11 @@ Para una instalación nueva, `supabase/schema.sql` ya incluye todo.
 - Cada asesorado solo ve y registra sus propios datos (políticas RLS verificadas).
 - El asesorado solo puede crear sus propios borradores generados por la valoración; no puede publicarlos ni modificarlos si la publicación automática está desactivada.
 - Solo el entrenador modifica planes aprobados, rutinas, plantillas, bibliotecas y ajustes.
-- El entrenador no puede modificar ni borrar las fotos ni las llaves de los asesorados.
+- El entrenador no puede abrir, modificar ni reemplazar las fotos ni las llaves de los asesorados. Solo puede borrar los archivos cifrados al eliminar definitivamente la cuenta de un asesorado.
+- La eliminación de asesorados se hace con una función del servidor que verifica que quien la ejecuta es el entrenador y no permite eliminar cuentas de entrenador.
+- Membresías e informes: el asesorado solo lee los suyos; solo el entrenador los crea o modifica.
 - Al cerrar sesión se eliminan de la memoria las llaves de fotos y las imágenes descifradas.
 
 ## Modo demostración
 
-Con `SUPABASE_URL` vacío la app abre en modo demo: un entrenador, dos asesorados con historial y una asesorada nueva (Laura) para probar la valoración inicial.
+Con `SUPABASE_URL` vacío la app abre en modo demo: un entrenador, dos asesorados con historial (Juan con la membresía por vencer) y una asesorada nueva (Laura) para probar la valoración inicial y el generador de menús.

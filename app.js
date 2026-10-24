@@ -48,7 +48,7 @@ async function safe(fn) { try { await fn(); } catch (err) { console.error(err); 
 /* =====================================================================
    Capa de datos (Supabase o demo local)
    ===================================================================== */
-const DEMO_KEY = 'dp_demo_db_v2';
+const DEMO_KEY = 'dp_demo_db_v3';
 let demoData = null;
 function dd() {
   if (demoData) return demoData;
@@ -66,7 +66,7 @@ function matchRow(row, o) {
 const CASCADE = {
   routines: [['routine_days', 'routine_id']], routine_days: [['routine_exercises', 'day_id']], workouts: [['workout_sets', 'workout_id']],
   nutrition_plans: [['plan_meals', 'plan_id']], plan_meals: [['plan_options', 'meal_id']], plan_options: [['plan_items', 'option_id']],
-  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id']]
+  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id']]
 };
 const RESTRICT = { exercises: [['routine_exercises', 'exercise_id'], ['workout_sets', 'exercise_id']], foods: [['plan_items', 'food_id']] };
 function cascadeDelete(d, table, id) {
@@ -304,8 +304,8 @@ function renderNav() {
 function setActiveNav(name) {
   const coach = S.profile.role === 'coach';
   const map = coach
-    ? { '': 'asesorados', asesorado: 'asesorados', rutina: 'asesorados', resumen: 'asesorados', diario: 'asesorados', 'plan-nutri': 'asesorados', 'plan-ver': 'asesorados', compras: 'asesorados', ajustes: 'asesorados', ejercicio: 'biblioteca', alimentos: 'biblioteca', alimento: 'biblioteca' }
-    : { '': 'hoy', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', fotos: 'historial', 'plan-ver': 'hoy', compras: 'hoy', checkin: 'hoy', valoracion: 'perfil' };
+    ? { '': 'asesorados', asesorado: 'asesorados', rutina: 'asesorados', resumen: 'asesorados', diario: 'asesorados', 'plan-nutri': 'asesorados', 'plan-ver': 'asesorados', compras: 'asesorados', ajustes: 'asesorados', informe: 'asesorados', ejercicio: 'biblioteca', alimentos: 'biblioteca', alimento: 'biblioteca', videos: 'biblioteca' }
+    : { '': 'hoy', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', fotos: 'historial', 'plan-ver': 'hoy', compras: 'hoy', checkin: 'hoy', valoracion: 'perfil', informe: 'perfil', informes: 'perfil', recordatorios: 'perfil' };
   const key = map[name] ?? name;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.nav === key));
   const pill = document.getElementById('live-pill');
@@ -337,6 +337,8 @@ async function route() {
       if (name === 'diario') return await vHoy(b, a);
       if (name === 'resumen') return await vResumen(a);
       if (name === 'ajustes') return await vAjustes();
+      if (name === 'informe') return await vInforme(a, b, c);
+      if (name === 'videos') return vVideos();
       if (name === 'perfil') return vPerfil();
       return await vAsesorados();
     }
@@ -345,6 +347,9 @@ async function route() {
     if (name === 'valoracion') return await vMiValoracion();
     if (name === 'checkin') return await vCheckin();
     if (name === 'fotos') return await vFotos();
+    if (name === 'informe') return await vInforme(a, b, c);
+    if (name === 'informes') return await vMisInformes();
+    if (name === 'recordatorios') return await vRecordatorios();
     if (name === 'entreno') return vEntreno();
     if (name === 'historial') return paint(progSeg('historial') + await historialHtml(S.profile.id), {}, 'Progreso');
     if (name === 'progreso') return await vProgreso(S.profile.id, '#/progreso', a, 'Progreso', progSeg('progreso'));
@@ -547,7 +552,7 @@ function exCard(e, ei) {
   const doneCount = e.sets.filter(s => s.done).length;
   const hint = typeof progressionHint === 'function' ? progressionHint(e) : null;
   return `<div class="card ex-card${doneCount && doneCount === e.sets.length ? ' complete' : ''}">
-    <div class="ex-title"><button class="link-title" data-act="info" data-id="${esc(e.exercise_id)}">${esc(ex.name)}</button><span class="tag">${esc(ex.muscle_group)}</span></div>
+    <div class="ex-title"><button class="link-title" data-act="info" data-id="${esc(e.exercise_id)}">${esc(ex.name)}</button>${ex.video_url ? `<button class="vid-btn" data-act="info" data-id="${esc(e.exercise_id)}" aria-label="Ver video de la técnica">▶ Técnica</button>` : ''}<span class="tag">${esc(ex.muscle_group)}</span></div>
     ${orig ? `<div class="swapped">Sustituye a: ${esc(orig.name)}</div>` : ''}
     ${tline ? `<div class="target">Objetivo: ${esc(tline)}</div>` : ''}
     ${hint ? `<div class="hint${hint.up ? ' up' : ''}">${esc(hint.text)}</div>` : ''}
@@ -655,8 +660,9 @@ function exInfoModal(id) {
   const alts = S.exercises.filter(x => e.family && x.family === e.family && x.id !== e.id);
   modal(`${modalHead(e.name)}
     <div class="chips"><span class="tag">${esc(e.muscle_group)}</span>${e.equipment ? `<span class="tag">${esc(e.equipment)}</span>` : ''}</div>
-    ${e.instructions ? `<p class="pre">${esc(e.instructions)}</p>` : '<p class="muted small">Sin indicaciones técnicas registradas.</p>'}
-    ${e.video_url ? `<a class="btn block" href="${esc(e.video_url)}" target="_blank" rel="noopener">Ver video de la técnica</a>` : ''}
+    ${e.video_url && typeof videoEmbed === 'function' ? videoEmbed(e.video_url) : ''}
+    ${e.instructions ? `<p class="pre">${esc(e.instructions)}</p>` : (e.video_url ? '' : '<p class="muted small">Sin indicaciones técnicas registradas.</p>')}
+    ${e.video_url ? `<a class="btn block" href="${esc(e.video_url)}" target="_blank" rel="noopener">Abrir el video en otra ventana</a>` : ''}
     ${alts.length ? `<h4>Variantes</h4><ul class="plain">${alts.map(a => `<li>${esc(a.name)} <small class="muted">${esc(a.equipment || '')}</small></li>`).join('')}</ul>` : ''}`);
 }
 
@@ -862,6 +868,8 @@ function vPerfil() {
     ${client ? `<a class="card row-link" href="#/valoracion"><div><b>Mi valoración inicial</b><small class="muted">Ver o descargar en PDF y HTML</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/checkin"><div><b>Check-in semanal</b><small class="muted">Peso, cumplimiento y sensaciones de la semana</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/fotos"><div><b>Fotos de progreso</b><small class="muted">Protegidas con tu contraseña de fotos</small></div><span class="chev">›</span></a>
+      <a class="card row-link" href="#/informes"><div><b>Informes mensuales</b><small class="muted">Tu progreso del mes en PDF y HTML</small></div><span class="chev">›</span></a>
+      <a class="card row-link" href="#/recordatorios"><div><b>Recordatorios en el celular</b><small class="muted">Comidas, agua, entrenamiento y check-in en tu calendario</small></div><span class="chev">›</span></a>
       ${waBtn(S.settings.whatsapp, `Hola, soy ${p.full_name || ''}, asesorado de ${BRAND.name}.`, 'Escribir a mi entrenador por WhatsApp', 'btn block')}`
       : '<a class="card row-link" href="#/ajustes"><div><b>Ajustes de automatización</b><small class="muted">Publicación de planes, cálculos, plantillas, WhatsApp y fotos</small></div><span class="chev">›</span></a>'}
     ${DEMO ? '<button class="btn block" data-act="reset">Restablecer datos de demostración</button>' : ''}
@@ -879,7 +887,12 @@ function vPerfil() {
    ENTRENADOR · Asesorados
    ===================================================================== */
 async function vAsesorados() {
-  const clients = await DB.select('profiles', { eq: { role: 'client' }, order: 'full_name' });
+  const all = await DB.select('profiles', { eq: { role: 'client' }, order: 'full_name' });
+  const mem = typeof loadMemberships === 'function' ? await loadMemberships() : {};
+  const archived = all.filter(c => mem[c.id] && mem[c.id].archived);
+  const showArch = !!S.showArchived && archived.length > 0;
+  const clients = all.filter(c => !(mem[c.id] && mem[c.id].archived));
+  const listed = showArch ? archived : clients;
   const recent = await DB.select('workouts', { order: 'started_at', asc: false, limit: 500 });
   const routines = await DB.select('routines', { eq: { active: true } });
   const nplans = await DB.select('nutrition_plans', { eq: { active: true } });
@@ -890,15 +903,17 @@ async function vAsesorados() {
   const html = `${await inboxHtml(clients)}
     <div class="stats3"><div><b>${clients.length}</b><small>Asesorados</small></div><div><b>${Object.keys(wk).length}</b><small>Activos 7 días</small></div><div><b>${Object.values(wk).reduce((a, b) => a + b, 0)}</b><small>Sesiones 7 días</small></div></div>
     <input class="input" id="cf" placeholder="Buscar asesorado">
-    ${clients.length ? clients.map(c => `<a class="card row-link cl-item" data-n="${esc(norm(c.full_name + ' ' + c.email))}" href="#/asesorado/${c.id}">
-      <div><b>${esc(c.full_name || c.email)}</b><small class="muted">${last[c.id] ? 'Última sesión ' + fmtDateShort(last[c.id].started_at) : 'Sin sesiones registradas'}${withRoutine.has(c.id) ? '' : ' · <span class="warn">sin rutina activa</span>'}${withPlan.has(c.id) ? '' : ' · <span class="warn">sin plan nutricional</span>'}</small></div>
-      <span class="kpi">${wk[c.id] || 0}<small>7 días</small></span></a>`).join('')
+    ${archived.length ? `<div class="seg"><button class="${showArch ? '' : 'on'}" data-act="arch" data-v="0">Activos (${clients.length})</button><button class="${showArch ? 'on' : ''}" data-act="arch" data-v="1">Archivados (${archived.length})</button></div>` : ''}
+    ${listed.length ? listed.map(c => { const st = typeof membStatus === 'function' ? membStatus(mem[c.id]) : null; return `<a class="card row-link cl-item" data-n="${esc(norm(c.full_name + ' ' + c.email))}" href="#/asesorado/${c.id}">
+      <div><b>${esc(c.full_name || c.email)}</b><small class="muted">${last[c.id] ? 'Última sesión ' + fmtDateShort(last[c.id].started_at) : 'Sin sesiones registradas'}${withRoutine.has(c.id) ? '' : ' · <span class="warn">sin rutina activa</span>'}${withPlan.has(c.id) ? '' : ' · <span class="warn">sin plan nutricional</span>'}${st && (st.expired || st.soon) ? ` · <span class="${st.expired ? 'bad' : 'warn'}">${esc(st.label.toLowerCase())}</span>` : ''}</small></div>
+      <span class="kpi">${wk[c.id] || 0}<small>7 días</small></span></a>`; }).join('')
       : '<div class="card empty"><p>Aún no hay asesorados registrados.</p></div>'}
     <div class="card"><h3>Añadir asesorados</h3><p class="small">Comparte el enlace de la app. Cada asesorado crea su cuenta, completa la valoración inicial y el sistema genera su plan nutricional y su rutina. Según tus ajustes, quedan en revisión en Pendientes o se publican automáticamente.</p>
       <button class="btn block" data-act="copy">Copiar enlace de la app</button></div>`;
   paint(html, {
     input: t => { if (t.id === 'cf') { const q = norm(t.value); document.querySelectorAll('.cl-item').forEach(a => { a.hidden = q && !a.dataset.n.includes(q); }); } },
     click: {
+      arch: el => { S.showArchived = el.dataset.v === '1'; route(); },
       copy: async () => { const url = location.origin + location.pathname; try { await navigator.clipboard.writeText(url); toast('Enlace copiado'); } catch (e) { prompt('Copia este enlace:', url); } },
       ibPhase2: async el => { if (!confirm('¿Generar y publicar la Fase 2 de este asesorado? La Fase 1 quedará inactiva.')) return; el.disabled = true; const id = await generatePhase2(el.dataset.id); toast('Fase 2 publicada'); location.hash = '#/rutina/' + id; }
     }
@@ -909,14 +924,16 @@ async function vAsesorado(id, tab, sub) {
   const c = (await DB.select('profiles', { eq: { id } }))[0];
   if (!c) return paint('<div class="card"><p>Asesorado no encontrado.</p></div>');
   const base = '#/asesorado/' + id;
-  const tabs = `<div class="chips scroll tabs2">${[['valoracion', 'Valoración'], ['rutinas', 'Entreno'], ['nutricion', 'Nutrición'], ['seguimiento', 'Seguimiento'], ['checkins', 'Check-ins'], ['fotos', 'Fotos'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios']].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
+  const mh = typeof membershipHead === 'function' ? await membershipHead(c) : { html: '', click: {} };
+  const tabs = `<div class="chips scroll tabs2">${[['valoracion', 'Valoración'], ['rutinas', 'Entreno'], ['nutricion', 'Nutrición'], ['seguimiento', 'Seguimiento'], ['checkins', 'Check-ins'], ['informes', 'Informes'], ['fotos', 'Fotos'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios']].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
   const head = `<div class="card"><div class="day-h"><p class="small muted">${esc(c.email || '')}${c.phone ? ' · ' + esc(c.phone) : ''}</p>${waBtn(c.phone, `Hola ${firstName(c.full_name)}, `)}</div>
-    <label class="field"><span>Objetivo del asesorado</span><textarea class="input" rows="2" data-goal placeholder="Ej.: Tenista juvenil · fuerza y potencia para la temporada">${esc(c.goal || '')}</textarea></label></div>`;
+    <label class="field"><span>Objetivo del asesorado</span><textarea class="input" rows="2" data-goal placeholder="Ej.: Tenista juvenil · fuerza y potencia para la temporada">${esc(c.goal || '')}</textarea></label>
+    ${mh.html}</div>`;
   let body = '';
-  const handlers = { click: {}, change: async t => { if ('goal' in t.dataset) { await DB.update('profiles', id, { goal: t.value.trim() }); toast('Objetivo guardado'); } } };
+  const handlers = { click: Object.assign({}, mh.click), change: async t => { if ('goal' in t.dataset) { await DB.update('profiles', id, { goal: t.value.trim() }); toast('Objetivo guardado'); } } };
 
   let after = null;
-  const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab };
+  const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab, informes: typeof coachInformesTab === 'function' ? coachInformesTab : null };
   if (tab === 'historial') body = await historialHtml(id);
   else if (MODS[tab]) {
     const r = await MODS[tab](id);
@@ -991,7 +1008,7 @@ async function vRutina(id) {
           <button class="icon-btn" data-act="mvDay" data-id="${d.id}" data-dir="1" ${di === days.length - 1 ? 'disabled' : ''} aria-label="Bajar día">↓</button>
           <button class="icon-btn danger" data-act="delDay" data-id="${d.id}" aria-label="Eliminar día">✕</button></div>
         ${items.map((x, i) => `<div class="rex">
-          <div class="rex-h"><b>${i + 1}. ${esc(exName(x.exercise_id))}</b><span class="tag">${esc(exGroup(x.exercise_id))}</span>
+          <div class="rex-h"><b>${i + 1}. ${esc(exName(x.exercise_id))}</b>${(S.exById[x.exercise_id] || {}).video_url ? '<span class="tag vid-t" title="Tiene video de técnica">▶</span>' : ''}<span class="tag">${esc(exGroup(x.exercise_id))}</span>
             <span class="rex-btns"><button class="icon-btn" data-act="mvEx" data-id="${x.id}" data-day="${d.id}" data-dir="-1" ${i === 0 ? 'disabled' : ''} aria-label="Subir">↑</button><button class="icon-btn" data-act="mvEx" data-id="${x.id}" data-day="${d.id}" data-dir="1" ${i === items.length - 1 ? 'disabled' : ''} aria-label="Bajar">↓</button><button class="icon-btn" data-act="chEx" data-id="${x.id}" aria-label="Cambiar ejercicio">⇄</button><button class="icon-btn danger" data-act="delEx" data-id="${x.id}" aria-label="Quitar">✕</button></span></div>
           <div class="rex-grid">
             <label><span>Series</span><input class="input" inputmode="numeric" data-tbl="routine_exercises" data-id="${x.id}" data-f="sets" data-type="int" value="${x.sets ?? ''}"></label>
@@ -1043,9 +1060,9 @@ function vBiblioteca() {
   const listHtml = () => {
     const ql = norm(q);
     const list = S.exercises.filter(e => (!g || e.muscle_group === g) && (!ql || norm(e.name + ' ' + (e.family || '') + ' ' + (e.equipment || '')).includes(ql)));
-    return `<p class="small muted">${list.length} ejercicios</p>` + list.map(e => `<a class="card row-link" href="#/ejercicio/${e.id}"><div><b>${esc(e.name)}</b><small class="muted">${esc(e.muscle_group)} · ${esc(e.equipment || '—')}${e.family ? ' · ' + esc(e.family) : ''}</small></div><span class="chev">›</span></a>`).join('');
+    return `<p class="small muted">${list.length} ejercicios · ${list.filter(e => e.video_url).length} con video</p>` + list.map(e => `<a class="card row-link" href="#/ejercicio/${e.id}"><div><b>${esc(e.name)}${e.video_url ? ' <span class="tag vid-t">▶ Video</span>' : ''}</b><small class="muted">${esc(e.muscle_group)} · ${esc(e.equipment || '—')}${e.family ? ' · ' + esc(e.family) : ''}</small></div><span class="chev">›</span></a>`).join('');
   };
-  paint(`${libSeg('biblioteca')}<a class="btn primary block" href="#/ejercicio/nuevo">+ Nuevo ejercicio</a>
+  paint(`${libSeg('biblioteca')}<div class="row-btns"><a class="btn primary" href="#/ejercicio/nuevo">+ Nuevo ejercicio</a><a class="btn" href="#/videos">Videos de técnica</a></div>
     <input class="input" id="lq" placeholder="Buscar por nombre, equipo o familia">
     <div class="chips scroll">${['', ...groups].map(x => `<button class="chip${x === g ? ' on' : ''}" data-act="g" data-g="${esc(x)}">${esc(x || 'Todos')}</button>`).join('')}</div>
     <div id="lib-list">${listHtml()}</div>`, {
@@ -1072,7 +1089,9 @@ function vEjercicio(id) {
       <datalist id="fam-list">${fams.map(x => `<option value="${esc(x)}">`).join('')}</datalist>
       <p class="small muted">Los ejercicios de la misma familia se ofrecen como sustitutos durante la sesión cuando la máquina está ocupada o no está disponible.</p>
       <label class="field"><span>Indicaciones técnicas</span><textarea class="input" name="instructions" rows="4" placeholder="Posición, recorrido, respiración, errores frecuentes…">${esc(e.instructions || '')}</textarea></label>
-      <label class="field"><span>Enlace de video (opcional)</span><input class="input" name="video_url" type="url" value="${esc(e.video_url || '')}" placeholder="https://…"></label>
+      <label class="field"><span>Video de la técnica (YouTube, Shorts o Vimeo)</span><input class="input" name="video_url" type="url" value="${esc(e.video_url || '')}" placeholder="https://youtu.be/…"></label>
+      ${e.video_url && typeof videoEmbed === 'function' ? videoEmbed(e.video_url) : ''}
+      ${!isNew && e.name ? `<a class="small" href="https://www.youtube.com/results?search_query=${encodeURIComponent('técnica ' + e.name)}" target="_blank" rel="noopener">Buscar videos de «${esc(e.name)}» en YouTube</a>` : ''}
       <button class="btn primary block" type="submit">${isNew ? 'Crear ejercicio' : 'Guardar cambios'}</button>
     </form>
     ${alts.length ? `<div class="card"><h3>Variantes (familia: ${esc(e.family)})</h3><ul class="plain">${alts.map(a => `<li><a href="#/ejercicio/${a.id}">${esc(a.name)}</a> <small class="muted">${esc(a.equipment || '')}</small></li>`).join('')}</ul></div>` : ''}

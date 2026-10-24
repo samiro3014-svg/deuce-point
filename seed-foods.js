@@ -17,7 +17,8 @@ window.SEED_FOODS = [
     ['Huevo entero', 143, 12.6, 0.7, 9.5, 0, 'unidad', 50],
     ['Clara de huevo', 52, 10.9, 0.7, 0.2, 0, 'unidad', 33],
     ['Jamón de pollo', 110, 16, 3, 3.5, 0, 'tajada', 20],
-    ['Hígado de res cocido', 175, 27, 5, 4.7, 0, 'porción', 100]] },
+    ['Hígado de res cocido', 175, 27, 5, 4.7, 0, 'porción', 100],
+    ['Tofu firme', 144, 17.3, 2.8, 8.7, 2.3, 'porción', 100]] },
   { cat: 'Lácteos', x: [
     ['Leche entera', 61, 3.2, 4.8, 3.3, 0, 'vaso', 240],
     ['Leche descremada', 34, 3.4, 5, 0.1, 0, 'vaso', 240],
@@ -101,6 +102,7 @@ window.SEED_FOODS = [
     ['Semillas de chía', 486, 16.5, 42.1, 30.7, 34.4, 'cucharada', 12]] },
   { cat: 'Suplementos', x: [
     ['Proteína whey (polvo)', 390, 78, 8, 5, 0, 'scoop', 30],
+    ['Proteína vegetal en polvo', 380, 75, 8, 6, 3, 'scoop', 30],
     ['Creatina monohidratada', 0, 0, 0, 0, 0, 'cucharadita', 5]] },
   { cat: 'Bebidas', x: [
     ['Jugo de naranja natural', 45, 0.7, 10.4, 0.2, 0.2, 'vaso', 240],

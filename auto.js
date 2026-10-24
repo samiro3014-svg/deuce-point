@@ -14,7 +14,7 @@ const ACT_LVL = ['Sedentario', 'Leve', 'Moderado', 'Intenso'];
 const FA_SEX = { M: [1.3, 1.6, 1.7, 2.1], F: [1.3, 1.5, 1.6, 1.9] };
 const RELIABLE_COMP = ['InBody o bioimpedancia profesional', 'Pliegues cutáneos', 'DEXA', 'Evaluación del entrenador'];
 const COMP_METHODS = ['InBody o bioimpedancia profesional', 'Pliegues cutáneos', 'DEXA', 'Báscula casera', 'No sé'];
-const SETTINGS_DEF = { auto_publish: false, loss_rate_pct: 0.75, deficit_min: 300, deficit_max: 750, recomp_deficit: 250, surplus_beg: 500, surplus_int: 350, surplus_adv: 250, protein_gkg: 2, fat_gkg: 0.9, rest_carb_cut: 125, rest_carb_min_gkg: 2, peri_carb_pct: 60, cardio_z2: true, adapt_weeks: 4 };
+const SETTINGS_DEF = { auto_publish: false, loss_rate_pct: 0.75, deficit_min: 300, deficit_max: 750, recomp_deficit: 250, surplus_beg: 500, surplus_int: 350, surplus_adv: 250, protein_gkg: 2, fat_gkg: 0.9, rest_carb_cut: 125, rest_carb_min_gkg: 2, peri_carb_pct: 60, cardio_z2: true, adapt_weeks: 4, menu_source: 'generador', menu_options: 3, renew_days: 7 };
 const DEFAULT_PLAN_NOTES = 'Pesar los alimentos en el estado indicado en el plan (cocido o crudo).\nDistribuir el agua indicada a lo largo del día.\nUsar la opción «Reemplazar» para cambiar un alimento por un equivalente del mismo grupo.';
 const DEFAULT_ROUTINE_NOTES = 'Calentamiento de 8 a 10 minutos: movilidad articular y 2 series de aproximación en el primer ejercicio.\nRIR: repeticiones que quedan en reserva al terminar la serie.\nProgresión: cuando completes el máximo de repeticiones en todas las series con el RIR indicado, aumenta la carga entre 2,5 y 5 %.';
 
@@ -135,6 +135,7 @@ async function loadSettings() {
   try { r = (await DB.select('app_settings', { eq: { id: 1 } }))[0]; }
   catch (e) { console.warn('app_settings no disponible: ejecutar supabase/migracion-v3.sql', e); S.needsMigration = true; }
   S.needsV4 = !(r && r.data && num(r.data.schema_version) >= 4);
+  S.needsV5 = !(r && r.data && num(r.data.schema_version) >= 5);
   S.settings = Object.assign({}, SETTINGS_DEF, r ? r.data || {} : {});
 }
 async function saveSettings(patch) {
@@ -304,7 +305,9 @@ async function baseStructure(goal) {
   const byName = n => S.foods.find(f => f.name === n);
   return { meals: NUTRI_BASE.map(([name, time_label, instructions, opts]) => ({ name, time_label, instructions, options: opts.map(([on, items]) => ({ name: on, items: items.map(([fn, g]) => ({ food_id: (byName(fn) || {}).id, grams: g, note: '' })).filter(i => i.food_id) })) })), notes: '' };
 }
-async function buildNutrition(d, t) {
+async function buildNutrition(d, t, opts = {}) {
+  const src = opts.source || S.settings.menu_source || 'generador';
+  if (src === 'generador' && typeof generateMenus === 'function') return generateMenus(d, t, opts);
   const st = await baseStructure(t.goal); const notes = [];
   let meals = st.meals;
   if (t.meals === 4 && meals.length >= 5) { const i = meals.findIndex(m => /media/i.test(m.name)); meals.splice(i >= 0 ? i : 1, 1); }
@@ -812,6 +815,7 @@ function regenModal(cid, it) {
     <label class="field"><span>Objetivo</span><select class="input" id="rg-goal">${Object.entries(GOAL_LBL).map(([k, l]) => `<option value="${k}"${k === c.goal ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
     <div class="rex-grid three"><label><span>Actividad</span><select class="input" id="rg-act">${actOpts}</select></label><label><span>Ajuste kcal</span><input class="input" id="rg-adj" inputmode="numeric" placeholder="Automático"></label><label><span>Comidas</span><select class="input" id="rg-meals"><option${c.meals === 5 ? ' selected' : ''}>5</option><option${c.meals === 4 ? ' selected' : ''}>4</option></select></label></div>
     <div class="rex-grid three"><label><span>Proteína g/kg</span><input class="input" id="rg-pg" inputmode="decimal" value="${c.pg ?? ''}"></label><label><span>Grasa g/kg</span><input class="input" id="rg-fg" inputmode="decimal" value="${c.fg ?? ''}"></label><label><span>Días entreno</span><select class="input" id="rg-days">${[2, 3, 4, 5, 6].map(n => `<option${n === c.days ? ' selected' : ''}>${n}</option>`).join('')}</select></label></div>
+    <label class="field"><span>Menús del plan</span><select class="input" id="rg-src"><option value="generador"${(S.settings.menu_source || 'generador') === 'generador' ? ' selected' : ''}>Generador personalizado (nueva variación)</option><option value="plantilla"${S.settings.menu_source === 'plantilla' ? ' selected' : ''}>Plantilla asignada al objetivo</option></select></label>
     <label class="field"><span>Fase de la rutina</span><select class="input" id="rg-phase"><option value="auto">Automática según nivel</option><option value="1">Fase 1 · Adaptación anatómica</option><option value="2">Fase 2 · Desarrollo</option></select></label>
     <label class="check"><input type="checkbox" id="rg-plan" checked> Regenerar plan nutricional</label>
     <label class="check"><input type="checkbox" id="rg-rut" checked> Regenerar rutina</label>
@@ -824,7 +828,7 @@ function regenModal(cid, it) {
         const calc = Object.assign({}, c, t, { flags: undefined });
         if ($('#rg-plan').checked) {
           for (const p of await DB.select('nutrition_plans', { eq: { client_id: cid, review: true } })) await DB.remove('nutrition_plans', p.id);
-          const built = await buildNutrition(it.data, t); calc.plan_id = await insertNutritionPlan(cid, t, built, false); calc.log = built.log;
+          const built = await buildNutrition(it.data, t, { source: $('#rg-src').value, seed: Date.now() & 0xffffffff }); calc.plan_id = await insertNutritionPlan(cid, t, built, false); calc.log = built.log;
         }
         if ($('#rg-rut').checked) {
           for (const r of await DB.select('routines', { eq: { client_id: cid, review: true } })) await DB.remove('routines', r.id);
@@ -1072,11 +1076,12 @@ async function inboxInner(clients) {
   const recal = approved.filter(i => byId[i.client_id] && withPlan.has(i.client_id) && daysBetween(dateStr(new Date((i.calc && i.calc.recalc_at) || i.reviewed_at || i.created_at)), todayStr()) >= 28);
   phaseEnd.forEach(r => rows.push(`<div class="ib-row"><span class="ib-tag f">Fin de fase</span><a class="ib-n" href="#/asesorado/${r.client_id}/valoracion">${esc(byId[r.client_id].full_name || '')}</a><span class="ib-m"><button class="chip" data-act="ibPhase2" data-id="${r.client_id}">Generar Fase 2</button></span></div>`));
   recal.forEach(i => rows.push(`<a class="ib-row" href="#/asesorado/${i.client_id}/valoracion"><span class="ib-tag r">Recalibrar</span><span class="ib-n">${esc(byId[i.client_id].full_name || '')}</span><span class="ib-m">Recalibración mensual</span></a>`));
+  if (typeof inboxManagementRows === 'function') rows.push(...await inboxManagementRows(byId, approved));
   intakes.filter(i => byId[i.client_id]).forEach(i => rows.push(`<a class="ib-row" href="#/asesorado/${i.client_id}/valoracion"><span class="ib-tag v">Valoración</span><span class="ib-n">${esc(byId[i.client_id].full_name || byId[i.client_id].email)}</span><span class="ib-m">${(i.flags || []).filter(f => f.level !== 'info').length ? `<span class="warn">${(i.flags || []).filter(f => f.level !== 'info').length} alertas</span>` : 'Sin alertas'}</span></a>`));
   cks.filter(c => byId[c.client_id]).forEach(c => rows.push(`<a class="ib-row" href="#/asesorado/${c.client_id}/checkins"><span class="ib-tag c">Check-in</span><span class="ib-n">${esc(byId[c.client_id].full_name || '')}</span><span class="ib-m">${fmtDM(parseDay(c.check_date))}</span></a>`));
   inactive.forEach(c => rows.push(`<div class="ib-row"><span class="ib-tag i">Inactivo</span><a class="ib-n" href="#/asesorado/${c.id}/seguimiento">${esc(c.full_name || c.email)}</a><span class="ib-m">${lastAct[c.id] ? daysBetween(lastAct[c.id], todayStr()) + ' días' : 'sin registros'} ${waBtn(c.phone, `Hola ${firstName(c.full_name)}, ¿cómo vas con tu plan esta semana? Recuerda registrar tus comidas y entrenamientos en Deuce Point.`, 'WhatsApp', 'chip wa')}</span></div>`));
   return `<div class="card inbox"><div class="day-h"><h3>Pendientes</h3><a class="btn sm" href="#/ajustes">Ajustes</a></div>
-    ${rows.length ? rows.join('') : '<p class="small muted">Sin pendientes. Las valoraciones nuevas, los check-ins y los asesorados sin registros durante 5 días aparecen aquí.</p>'}</div>`;
+    ${rows.length ? rows.join('') : '<p class="small muted">Sin pendientes. Las valoraciones nuevas, los check-ins, las renovaciones, los informes mensuales y los asesorados sin registros durante 5 días aparecen aquí.</p>'}</div>${S.needsV5 && typeof V5_NOTICE === 'string' ? V5_NOTICE : ''}`;
 }
 
 /* =====================================================================
@@ -1107,16 +1112,21 @@ async function vAjustes() {
       <div class="rex-grid">${n('adapt_weeks', 'Semanas adaptación')}</div>
       <label class="check"><input type="checkbox" data-s="cardio_z2" ${s.cardio_z2 !== false ? 'checked' : ''}> Agregar cardio en Zona 2 (20–30 min) al final de cada sesión</label>
       <p class="small muted">No se agrega a tenistas con 4 o más sesiones de cancha por semana.</p></div>
+    <div class="card"><h3>Menús del plan generado</h3>
+      <label class="field"><span>Origen de los menús</span><select class="input" data-s="menu_source"><option value="generador"${s.menu_source !== 'plantilla' ? ' selected' : ''}>Generador personalizado</option><option value="plantilla"${s.menu_source === 'plantilla' ? ' selected' : ''}>Plantilla asignada al objetivo</option></select></label>
+      <div class="rex-grid">${n('menu_options', 'Opciones por comida (1–5)')}</div>
+      <p class="small muted">Generador personalizado: cada comida se arma con alimentos de la base según su estructura (desayuno, refrigerio, almuerzo, cena), los alimentos preferidos, el presupuesto, las exclusiones y el momento del día con más hambre. Las porciones de cada opción cumplen la proteína, los carbohidratos y la grasa de esa comida. El costo y el uso de cada alimento se ajustan en Biblioteca › Alimentos.</p></div>
     <div class="card"><h3>Plantillas usadas por la generación automática</h3>
       <label class="field"><span>Plantilla general</span>${sel('tpl_default')}</label>
       <label class="field"><span>Pérdida de grasa</span>${sel('tpl_perdida')}</label>
       <label class="field"><span>Recomposición</span>${sel('tpl_recomp')}</label>
       <label class="field"><span>Ganancia de peso</span>${sel('tpl_ganancia')}</label>
       <label class="field"><span>Mantenimiento y rendimiento</span>${sel('tpl_mant')}</label>
-      <p class="small muted">La plantilla define comidas, opciones y alimentos. Las porciones se ajustan a la proteína, grasa y carbohidratos de cada persona, y los alimentos excluidos se reemplazan por equivalentes.</p></div>
+      <p class="small muted">Se usan cuando el origen de los menús es «Plantilla». La plantilla define comidas, opciones y alimentos. Las porciones se ajustan a la proteína, grasa y carbohidratos de cada persona, y los alimentos excluidos se reemplazan por equivalentes.</p></div>
     <div class="card"><h3>Textos por defecto</h3>
       <label class="field"><span>Indicaciones del plan nutricional</span><textarea class="input" rows="4" data-s="plan_notes">${esc(s.plan_notes || DEFAULT_PLAN_NOTES)}</textarea></label>
       <label class="field"><span>Indicaciones de la rutina</span><textarea class="input" rows="4" data-s="routine_notes">${esc(s.routine_notes || DEFAULT_ROUTINE_NOTES)}</textarea></label></div>
+    <div class="card"><h3>Membresías</h3><div class="rex-grid">${n('renew_days', 'Aviso de renovación (días antes)')}</div><p class="small muted">Las renovaciones próximas y vencidas aparecen en Pendientes con el mensaje de WhatsApp listo para enviar.</p></div>
     <div class="card"><h3>Contacto</h3><label class="field"><span>Tu número de WhatsApp</span><input class="input" data-s="whatsapp" inputmode="tel" value="${esc(s.whatsapp || '')}" placeholder="3001234567"></label><p class="small muted">Se muestra a los asesorados para escribirte directamente.</p></div>
     ${typeof coachKeyCardHtml === 'function' ? await coachKeyCardHtml() : ''}`, {
     change: async t => {
@@ -1154,12 +1164,14 @@ function progressionHint(e) {
    ===================================================================== */
 function buildAutoDemo(d) {
   const iso = new Date().toISOString(); const today = todayStr();
-  Object.assign(d, { intakes: [], checkins: [], photo_vaults: [], progress_photos: [], app_settings: [] });
+  Object.assign(d, { intakes: [], checkins: [], photo_vaults: [], progress_photos: [], app_settings: [], memberships: [], reports: [] });
   d.profiles.push({ id: 'demo-laura', email: 'laura@demo.app', full_name: 'Laura Gómez', role: 'client', goal: '', phone: '', created_at: iso });
   const ana = d.profiles.find(p => p.id === 'demo-ana'), juan = d.profiles.find(p => p.id === 'demo-juan');
   if (ana) ana.phone = '3001112233'; if (juan) juan.phone = '3004445566';
   const tpl = d.nutrition_plans.find(p => p.is_template);
-  d.app_settings.push({ id: 1, data: Object.assign({}, SETTINGS_DEF, { whatsapp: '3009998877', tpl_default: tpl ? tpl.id : '', schema_version: 4 }), updated_at: iso });
+  d.app_settings.push({ id: 1, data: Object.assign({}, SETTINGS_DEF, { whatsapp: '3009998877', tpl_default: tpl ? tpl.id : '', schema_version: 5 }), updated_at: iso });
+  d.memberships.push({ client_id: 'demo-juan', plan_name: 'Mensual', start_date: addDays(today, -27), end_date: addDays(today, 3), amount: 180000, notes: 'Pago por transferencia', archived: false, updated_at: iso },
+    { client_id: 'demo-ana', plan_name: 'Trimestral', start_date: addDays(today, -42), end_date: addDays(today, 48), amount: null, notes: null, archived: false, updated_at: iso });
   const base = { ciudad: 'Bogotá', trabajo: 'Sentado la mayor parte del día', pq1: 'No', pq2: 'No', pq3: 'No', pq4: 'No', pq5: 'No', pq6: 'No', pq7: 'No', enfermedades: ['Ninguna'], sc1: 'No', sc2: 'No', sc3: 'No', sc4: 'No', sc5: 'No', restricciones: ['Ninguna'], sueno: '7 a 8', lugar: 'Gimnasio', minutos: '60 min', consentimiento: 'Sí', datos: 'Sí', importancia: '9' };
   base.sc_sentadilla = ['Bajo completo sin compensaciones']; base.sc_bisagra = ['Mantengo los 3 puntos de contacto hasta unos 45°']; base.sc_wall = ['Brazos y manos tocan la pared en todo el recorrido'];
   const dA = { ...base, grasa_pct: '21', metodo_comp: 'InBody o bioimpedancia profesional', creatina: 'La voy a empezar', horario: 'Tarde', sc_tobillo: '12', nombre: 'Ana Torres', fecha_nac: '2009-03-14', whatsapp: '3001112233', sexo: 'Femenino', embarazo: 'No', ocupacion: 'Estudiante', peso: '57.6', talla: '166', objetivo: ['Rendimiento deportivo'], resultado: 'Mejorar potencia de saque y resistencia en partidos de tres sets.', comidas: '4', pasos: '7.000 a 10.000', experiencia: '6 meses a 2 años', dias: ['Lunes', 'Miércoles', 'Viernes'], deporte: 'Tenis', nivel_deporte: 'Juvenil federado', sesiones_deporte: '4 a 5', deportes: 'Tenis' };
