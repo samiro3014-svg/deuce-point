@@ -147,6 +147,7 @@ async function lessonCardHtml() {
   } catch (e) { return ''; }
 }
 async function vLecciones() {
+  if (S.needsV6) return paint(V6_NOTICE, {}, 'Lecciones');
   const ls = await lessonsFor(S.profile.id, S.intake && S.intake.data); const wk = lessonWeek(S.intake);
   const reads = new Set((await DB.select('lesson_reads', { eq: { client_id: S.profile.id } })).map(r => r.lesson_id));
   paint(`<a class="linkbtn" href="#/perfil">← Perfil</a><p class="small muted">Una lección nueva cada semana desde el inicio de tu plan. Semana actual: ${wk}.</p>

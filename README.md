@@ -6,6 +6,61 @@ Dirección: https://samiro3014-svg.github.io/deuce-point/
 
 ---
 
+## Novedades de la versión 6
+
+### Rendimiento en tenis (Progreso › Rendimiento y ficha › Rendimiento)
+- **Carga de entrenamiento:** al terminar cada sesión de fuerza el asesorado registra el esfuerzo percibido (RPE 0–10); la carga es RPE × minutos. Los partidos y prácticas de tenis se registran con minutos, superficie y RPE. Relación aguda:crónica (7 días ÷ promedio semanal de 4 semanas) con zonas: menor a 0,8 baja, 0,8–1,3 óptima, 1,3–1,5 precaución, mayor a 1,5 riesgo alto. Gráficos de barras por semana.
+- **Bienestar diario** en Hoy (sueño, energía, dolor muscular, estrés, ánimo; 1–5) con semáforo. Rojo aparece en Pendientes.
+- **Torneos y periodización:** 7 días antes del torneo el volumen de fuerza baja al 60 % de las series (40 % durante el torneo) y la sesión lo indica. La víspera los carbohidratos suben a 6 g/kg y en días de torneo a 7 g/kg, con las porciones de Hoy ajustadas. Valores en Ajustes.
+- **Partidos y práctica en Hoy:** el gasto del tenis (MET 7 práctica, 8 partido) se suma a las calorías del día, descontando las sesiones semanales ya incluidas en el factor de actividad de la valoración.
+- **Prueba de sudoración y plan de hidratación** (PDF y HTML): tasa de sudor en L/h, % de peso perdido, líquido por hora y por cambio de lado, sodio por hora y reposición posterior.
+- **Protocolo de día de torneo** (PDF y HTML): cronograma según la hora del partido (comida previa, hidratación, refrigerio, durante el juego, entre partidos y recuperación) con ejemplos en gramos.
+- **Pruebas físicas** (CMJ, sprints 5/10/20 m, 5-0-5, spider, hexágono, Yo-Yo IR1, balón medicinal, prensión) con referencias por sexo y categoría del metaanálisis de 8.008 tenistas juveniles (2025), clasificación ±5 %, barras de evolución e informe PDF y HTML. Se incluyen en el informe mensual.
+- **Molestias con mapa corporal:** con intensidad de 3 o más, los ejercicios que cargan la zona se marcan durante la sesión con alternativas; el entrenador recibe el aviso en Pendientes.
+- **Bloques de prevención** (hombro, codo, muñeca, tobillo, aductores) que se agregan a cualquier día de la rutina con un botón.
+
+### Nutrición
+- **Recetas:** cada opción de menú muestra la preparación paso a paso (automática según los alimentos y porciones, o escrita por el entrenador en el editor del plan). También en el documento del plan.
+- **Antropometría ISAK** (ficha › Antropometría): 8 pliegues, 6 perímetros y 3 diámetros; % de grasa con Yuhasz, Durnin-Womersley + Siri y Faulkner; masa muscular esquelética (Lee); somatotipo Heath-Carter; índices cintura/cadera y cintura/talla; evolución en barras e informe PDF y HTML. «Aplicar al seguimiento» deja el % de grasa listo para «Recalcular con datos actuales».
+- **Suplementación con protocolo** (ficha › Suplementos): creatina, cafeína, beta-alanina, nitratos y bicarbonato con dosis por kg, momento e indicaciones; registro de tomas en Hoy; documento PDF y HTML.
+- **Ciclo menstrual** (asesoradas): fase y día del ciclo en Hoy con recomendaciones por fase, y barras de energía, ánimo, hambre y rendimiento por fase.
+- **Costo de la lista de compras:** precio por kg editable (en la lista o en Biblioteca › Alimentos) y costo por días, por día y por mes.
+- **Comer fuera de casa:** guía para corrientazo, asadero, comida rápida, panadería, comida asiática y tienda, con porciones calculadas con el almuerzo del plan.
+- **Código de barras:** en «Añadir alimento» › Escanear, con la cámara o escribiendo el número; los datos vienen de Open Food Facts.
+
+### Entrenamiento y adherencia
+- **Superseries y tempo** en el editor de rutina (letra de superserie y tempo por ejercicio). En la sesión, el descanso se activa al terminar la superserie. **Temporizador de intervalos** (trabajo, descanso, rondas) dentro de la sesión.
+- **Mensajes** entre entrenador y asesorado dentro de la app, con respuestas guardadas (Ajustes) y aviso en Pendientes.
+- **Rachas y logros** (Progreso › Logros) y aviso de logro nuevo en Hoy.
+- **Lecciones semanales:** Biblioteca › Lecciones › «Cargar las 15 lecciones base» (12 generales y 3 para tenistas). Cada asesorado ve en Hoy la lección de su semana.
+- **Retos grupales** (Perfil › Retos grupales): pasos, hidratación, registro de comidas o sesiones, con tabla de posiciones opcional. El asesorado registra los pasos en Hoy.
+
+### Negocio
+- **Panel de negocio** (Asesorados › Negocio): membresías vigentes, ingresos y pagos por mes, retención, conversión de prospectos, membresías por nivel, vencimientos y exportación a Excel.
+- **Página de captación** (`inicio.html`): presentación, servicios y precios (Ajustes › Página de captación), calculadora de calorías y proteína y formulario que deja el prospecto en Pendientes y abre WhatsApp. Código QR descargable en Negocio › Página y QR.
+- **Pagos:** enlaces de pago fijos de Wompi o Mercado Pago por plan (Ajustes). Se muestran al asesorado en el aviso de vencimiento y se agregan al mensaje de renovación. Los pagos se registran al guardar o renovar una membresía con valor, o en Negocio › Pagos.
+- **Niveles de servicio** en la membresía: Completo, Nutrición (sin la sección Entreno) o Entrenamiento (sin el plan de alimentación en Hoy).
+- **Referidos:** cada asesorado tiene su código y enlace (Perfil); Negocio › Referidos muestra los clientes y prospectos que trajo y el descuento sugerido.
+- **Encuesta de satisfacción y testimonios:** a los 60 días y luego cada 3 meses; NPS, promedios por área y testimonios con autorización de uso.
+- **Asistente:** cuenta con acceso de lectura a los asesorados, respuesta de check-ins y mensajes, y registro de mediciones; sin acceso a ajustes, membresías, pagos, planes ni rutinas.
+- **Exportar a Excel:** ficha completa del asesorado (botón en la ficha y en Perfil del asesorado).
+- **Notificaciones push:** recordatorios con el menú vigente del plan, mensajes nuevos y, para el entrenador, valoraciones y check-ins nuevos.
+
+## Actualización a la versión 6
+
+1. **Supabase › SQL Editor › New query:** pegar todo `supabase/migracion-v6.sql` → **Run**. Requiere la v5. Se puede ejecutar de nuevo sin errores.
+2. **En la app › Perfil › Ajustes:** enlaces de pago, contenido de la página de captación, descuento por referido, respuestas guardadas y parámetros de torneos.
+3. **Biblioteca › Lecciones:** «Cargar las 15 lecciones base».
+4. **Asistente (opcional):** la persona crea su cuenta en la app y se ejecuta en SQL Editor:
+   `update public.profiles set role = 'assistant' where email = 'correo@ejemplo.com';`
+
+### Activar las notificaciones push (una sola vez)
+1. **App › Ajustes › Notificaciones push › Generar llaves.** Copiar los tres valores que aparecen.
+2. **Supabase › Edge Functions › Secrets:** agregar `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` y `VAPID_SUBJECT` con esos valores.
+3. **Supabase › Edge Functions › Deploy a new function › Via Editor:** nombre `enviar-notificaciones`; pegar el contenido de `supabase/functions/enviar-notificaciones/index.ts`; **Deploy**.
+4. **Supabase › Integrations › Cron:** activar la integración y crear una tarea: nombre `notificaciones`, programación `*/5 * * * *` (cada 5 minutos), tipo «Supabase Edge Function», método POST, función `enviar-notificaciones`.
+5. Cada asesorado activa las notificaciones en **Perfil › Recordatorios y notificaciones**; el entrenador, en **Perfil**. En iPhone se requiere iOS 16.4 o superior y la app agregada a la pantalla de inicio.
+
 ## Novedades de la versión 5
 
 - **Generador de menús propios.** Cada comida se arma con alimentos de la base según su estructura (desayuno, refrigerio, almuerzo, cena), los alimentos preferidos, el presupuesto (ajustado, moderado, amplio), las exclusiones y el momento del día con más hambre (más proteína en esa comida). Los horarios salen de la hora de despertar y de acostarse. Las porciones de cada opción se calculan para cumplir la proteína, los carbohidratos y la grasa de esa comida, con el 60 % de los carbohidratos en las comidas pre y post entreno. Por defecto, 3 opciones por comida y proteínas distintas entre opciones y entre almuerzo y cena. Si el promedio del día se aleja más de 8 % de algún macronutriente, aparece «Revisar porciones» en la valoración. En el editor del plan, **+ Opción automática** agrega una opción nueva con las mismas metas de la comida. En **Biblioteca › Alimentos** se define el costo y el uso (desayuno, refrigerios, almuerzo y cena) de cada alimento. En **Ajustes** se elige entre «Generador personalizado» y «Plantilla asignada al objetivo».
@@ -68,7 +123,7 @@ PAR-Q con alguna respuesta «Sí» (se le indica al asesorado buscar autorizaci�
 
 ---
 
-## Actualización a la versión 5 (una sola vez)
+## Actualización a la versión 5
 
 Supabase › SQL Editor › New query: pegar todo `supabase/migracion-v5.sql` → **Run**. Incluye la migración v4, así que no es necesario ejecutar la v4 por separado. Conserva los valores que ya tengas en Ajustes y se puede ejecutar de nuevo sin errores.
 
@@ -107,8 +162,12 @@ Para una instalación nueva, `supabase/schema.sql` ya incluye todo.
 - El entrenador no puede abrir, modificar ni reemplazar las fotos ni las llaves de los asesorados. Solo puede borrar los archivos cifrados al eliminar definitivamente la cuenta de un asesorado.
 - La eliminación de asesorados se hace con una función del servidor que verifica que quien la ejecuta es el entrenador y no permite eliminar cuentas de entrenador.
 - Membresías e informes: el asesorado solo lee los suyos; solo el entrenador los crea o modifica.
+- Mensajes: cada asesorado ve solo su conversación; nadie puede editar un mensaje enviado (solo marcarlo como leído).
+- Pagos, prospectos, membresías y ajustes: solo el entrenador. El asistente solo lee los datos de los asesorados, responde check-ins y mensajes y registra mediciones.
+- La página de captación solo puede crear prospectos a través de una función del servidor con validación (un registro por número cada 24 horas); no puede leer datos.
+- Las llaves privadas de las notificaciones se guardan como secretos en Supabase, no en la app.
 - Al cerrar sesión se eliminan de la memoria las llaves de fotos y las imágenes descifradas.
 
 ## Modo demostración
 
-Con `SUPABASE_URL` vacío la app abre en modo demo: un entrenador, dos asesorados con historial (Juan con la membresía por vencer) y una asesorada nueva (Laura) para probar la valoración inicial y el generador de menús.
+Con `SUPABASE_URL` vacío la app abre en modo demo: un entrenador, una asistente, dos asesorados con historial (Ana, tenista con torneo próximo, pruebas físicas, molestia y suplementación; Juan con antropometría, mensajes y membresía por vencer) y una asesorada nueva (Laura) para probar la valoración inicial y el generador de menús.
