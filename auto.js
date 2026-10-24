@@ -1079,6 +1079,7 @@ async function inboxInner(clients) {
   recal.forEach(i => rows.push(`<a class="ib-row" href="#/asesorado/${i.client_id}/valoracion"><span class="ib-tag r">Recalibrar</span><span class="ib-n">${esc(byId[i.client_id].full_name || '')}</span><span class="ib-m">Recalibración mensual</span></a>`));
   if (typeof inboxManagementRows === 'function') rows.push(...await inboxManagementRows(byId, approved));
   if (typeof inboxTenisRows === 'function') rows.push(...await inboxTenisRows(byId));
+  if (typeof inboxMessageRows === 'function') rows.push(...await inboxMessageRows(byId));
   intakes.filter(i => byId[i.client_id]).forEach(i => rows.push(`<a class="ib-row" href="#/asesorado/${i.client_id}/valoracion"><span class="ib-tag v">Valoración</span><span class="ib-n">${esc(byId[i.client_id].full_name || byId[i.client_id].email)}</span><span class="ib-m">${(i.flags || []).filter(f => f.level !== 'info').length ? `<span class="warn">${(i.flags || []).filter(f => f.level !== 'info').length} alertas</span>` : 'Sin alertas'}</span></a>`));
   cks.filter(c => byId[c.client_id]).forEach(c => rows.push(`<a class="ib-row" href="#/asesorado/${c.client_id}/checkins"><span class="ib-tag c">Check-in</span><span class="ib-n">${esc(byId[c.client_id].full_name || '')}</span><span class="ib-m">${fmtDM(parseDay(c.check_date))}</span></a>`));
   inactive.forEach(c => rows.push(`<div class="ib-row"><span class="ib-tag i">Inactivo</span><a class="ib-n" href="#/asesorado/${c.id}/seguimiento">${esc(c.full_name || c.email)}</a><span class="ib-m">${lastAct[c.id] ? daysBetween(lastAct[c.id], todayStr()) + ' días' : 'sin registros'} ${waBtn(c.phone, `Hola ${firstName(c.full_name)}, ¿cómo vas con tu plan esta semana? Recuerda registrar tus comidas y entrenamientos en Deuce Point.`, 'WhatsApp', 'chip wa')}</span></div>`));
@@ -1132,6 +1133,7 @@ async function vAjustes() {
       <p class="small muted">Valores por defecto: 6 g/kg la víspera, 7 g/kg en días de torneo, 7 días de descarga con el 60 % de las series (40 % durante el torneo).</p>
       <h4>Hidratación</h4><div class="rex-grid">${n('sweat_na_mgl', 'Sodio en sudor mg/L')}${n('sweat_na_salty', 'Sudor salado mg/L')}</div></div>
     <div class="card"><h3>Membresías</h3><div class="rex-grid">${n('renew_days', 'Aviso de renovación (días antes)')}</div><p class="small muted">Las renovaciones próximas y vencidas aparecen en Pendientes con el mensaje de WhatsApp listo para enviar.</p></div>
+    <div class="card"><h3>Respuestas guardadas para mensajes</h3><label class="field"><span>Una respuesta por línea</span><textarea class="input" rows="4" data-s="quick_replies">${esc(s.quick_replies || '')}</textarea></label></div>
     <div class="card"><h3>Contacto</h3><label class="field"><span>Tu número de WhatsApp</span><input class="input" data-s="whatsapp" inputmode="tel" value="${esc(s.whatsapp || '')}" placeholder="3001234567"></label><p class="small muted">Se muestra a los asesorados para escribirte directamente.</p></div>
     ${typeof coachKeyCardHtml === 'function' ? await coachKeyCardHtml() : ''}`, {
     change: async t => {

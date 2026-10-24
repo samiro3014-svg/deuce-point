@@ -438,3 +438,29 @@ ol.recipe { padding-left: 20px; margin: 6px 0; } ol.recipe li { margin: 6px 0; l
 video.scan { width: 100%; max-height: 52vh; background: #0f2a44; border-radius: 10px; object-fit: cover; }
 ul.plain.ok li { padding-left: 16px; position: relative; margin: 4px 0; } ul.plain.ok li::before { content: '•'; position: absolute; left: 2px; color: var(--accent); font-weight: 700; }
 .shop input.price-in { width: 110px; height: auto; grid-row: auto; grid-column: 3; justify-self: end; accent-color: auto; margin: 2px 0 0; }
+
+/* ---------- v6: comunicación y adherencia ---------- */
+.chat { display: flex; flex-direction: column; gap: 8px; max-height: 58vh; overflow-y: auto; padding: 8px 2px; }
+.msg { max-width: 82%; padding: 8px 12px; border-radius: 14px; font-size: 14px; }
+.msg p { margin: 0; } .msg small { display: block; font-size: 11px; opacity: .7; margin-top: 2px; text-align: right; }
+.msg.me { align-self: flex-end; background: var(--brand); color: #fff; border-bottom-right-radius: 4px; }
+.msg.them { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.msg-day { align-self: center; font-size: 11px; color: var(--muted); margin: 6px 0 2px; }
+.chat-in { display: flex; gap: 8px; align-items: flex-end; margin-top: 8px; } .chat-in .input { flex: 1; margin: 0; }
+.ach-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.ach { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; gap: 2px; opacity: .55; }
+.ach.on { opacity: 1; border-color: rgba(111, 178, 50, .6); }
+.ach-i { font-size: 20px; color: var(--muted); } .ach.on .ach-i { color: #e3a21a; }
+.ach small { font-size: 12px; color: var(--muted); }
+.streak { text-align: center; font-size: 13px; font-weight: 700; color: #3f7417; margin: 2px 0 8px; }
+.ach-new { border-left: 4px solid #e3a21a; } .lesson-c { border-left: 4px solid var(--brand); } .chal { border-left: 4px solid var(--accent); display: flex; flex-direction: column; gap: 4px; }
+a.chal { flex-direction: row; } .chal .btn { align-self: flex-start; }
+.row-link.locked { opacity: .55; }
+.card.lesson h2 { margin: 4px 0 10px; font-size: 20px; } .card.lesson .pre { line-height: 1.55; }
+.steps-in { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; font-size: 14px; } .steps-in .input { width: 130px; margin: 0; }
+.ex-card.grp { border-left: 4px solid #7a5bbf; } .grp-l { font-size: 11px; font-weight: 700; color: #5b3a9a; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+.tag.grp-t { background: #efe7fb; color: #5b3a9a; }
+.iv { text-align: center; border-radius: 16px; padding: 18px 8px; margin: 8px 0 12px; background: var(--card2); }
+.iv b { display: block; font-size: 64px; line-height: 1.1; font-variant-numeric: tabular-nums; } .iv small { font-size: 14px; color: var(--muted); }
+.iv.work { background: #e9f4dc; } .iv.rest { background: #e7f0f8; } .iv.prep { background: #fff6e5; } .iv.done { background: #edf6e3; }
+.wk-head .row-btns { margin: 0; }

@@ -340,7 +340,9 @@ async function vHoy(date, cid) {
   </div>`;
   html += `<div class="card"><div class="mb-h"><span>Agua</span><span><b>${(water / 1000).toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b> / ${(waterT / 1000).toLocaleString('es-CO', { maximumFractionDigits: 1 })} L</span></div>
     <div class="mb-t"><div class="mb-f w" style="width:${Math.min(100, water / waterT * 100).toFixed(1)}%"></div></div>
-    <div class="row-btns"><button class="btn sm" data-act="water" data-d="-250">− 250 ml</button><button class="btn sm primary" data-act="water" data-d="250">+ 250 ml</button><button class="btn sm" data-act="water" data-d="500">+ 500 ml</button></div></div>`;
+    <div class="row-btns"><button class="btn sm" data-act="water" data-d="-250">− 250 ml</button><button class="btn sm primary" data-act="water" data-d="250">+ 250 ml</button><button class="btn sm" data-act="water" data-d="500">+ 500 ml</button></div>
+    ${S.needsV6 ? '' : `<label class="steps-in"><span>Pasos del día</span><input class="input" data-steps inputmode="numeric" value="${num(daily && daily.steps) || ''}" placeholder="0"></label>`}</div>`;
+  if (own && isToday && typeof messageCardHtml === 'function') html += (await messageCardHtml()) + (await streakCardHtml()) + (await lessonCardHtml()) + (await challengeCardHtml().catch(() => ''));
   if (own && isToday && typeof wellnessCardHtml === 'function') html += await wellnessCardHtml();
   if (own && isToday && typeof cycleCardHtml === 'function') html += await cycleCardHtml();
   if (own && isToday && typeof supplementCardHtml === 'function') html += await supplementCardHtml().catch(() => '');
@@ -393,11 +395,13 @@ async function vHoy(date, cid) {
   if (plan) html += `<div class="row-btns"><a class="btn" href="#/plan-ver/${plan.id}">Ver plan completo</a><a class="btn" href="#/compras/${plan.id}">Lista de compras</a>${own && typeof vFuera === 'function' ? '<a class="btn" href="#/fuera">Comer fuera de casa</a>' : ''}</div>`;
 
   paint(html, {
+    change: async t => { if ('steps' in t.dataset) { await upsertDaily(cid, date, { steps: Math.max(0, Math.round(num(t.value))) }); toast('Pasos guardados'); } },
     click: {
       water: async el => { await upsertDaily(cid, date, { water_ml: Math.max(0, water + num(el.dataset.d)) }); rerender(); },
       ...(typeof wellnessHandlers === 'function' ? wellnessHandlers(rerender) : {}),
       ...(typeof supplementHandlers === 'function' ? supplementHandlers(rerender) : {}),
       ...(typeof cycleHandlers === 'function' ? cycleHandlers(rerender) : {}),
+      ...(typeof challengeHandlers === 'function' ? challengeHandlers(rerender) : {}),
       recipe: el => { const m = mealByKey[el.dataset.meal]; const o = m.options.find(x => x.id === choices[m.id]) || m.options[0]; if (o) recipeModal(o, rf); },
       dayT: async el => { await upsertDaily(cid, date, { choices: Object.assign({}, choices, { __day: el.dataset.v }) }); rerender(); },
       startWk: el => startWorkout(el.dataset.id),
@@ -622,7 +626,7 @@ async function adherenceSection(cid, dayLink) {
 }
 
 /* Pestañas de Progreso del asesorado */
-const progSeg = a => `<div class="chips scroll tabs2">${[['historial', 'Entrenamiento'], ['progreso', 'Ejercicios'], ['rendimiento', 'Rendimiento'], ['cuerpo', 'Cuerpo'], ['adherencia', 'Nutrición'], ['fotos', 'Fotos']].map(([k, l]) => `<a class="chip${a === k ? ' on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
+const progSeg = a => `<div class="chips scroll tabs2">${[['historial', 'Entrenamiento'], ['progreso', 'Ejercicios'], ['rendimiento', 'Rendimiento'], ['cuerpo', 'Cuerpo'], ['adherencia', 'Nutrición'], ['logros', 'Logros'], ['fotos', 'Fotos']].map(([k, l]) => `<a class="chip${a === k ? ' on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
 async function vCuerpo() { const b = await bodySection(S.profile.id); if (typeof antropometriaTab === 'function' && !S.needsV6) { const a = await antropometriaTab(S.profile.id); if ((await DB.select('anthropometry', { eq: { client_id: S.profile.id }, limit: 1 })).length) { b.html += '<h2 class="sec">Antropometría</h2>' + a.html; Object.assign(b.click, a.click); } } const pj = S.intake && S.intake.status === 'approved' && typeof projectionHtml === 'function' ? projectionHtml(S.intake.calc) : ''; paint(progSeg('cuerpo') + b.html + pj, { click: b.click }, 'Progreso'); }
 async function vAdherencia() { const a = await adherenceSection(S.profile.id, d => '#/hoy/' + d); paint(progSeg('adherencia') + a.html, {}, 'Progreso'); }
 
@@ -859,7 +863,7 @@ async function vPlantillas() {
 /* =====================================================================
    ENTRENADOR · Biblioteca de alimentos
    ===================================================================== */
-const libSeg = a => `<div class="seg tabs">${[['biblioteca', 'Ejercicios'], ['alimentos', 'Alimentos']].map(([k, l]) => `<a class="${a === k ? 'on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
+const libSeg = a => `<div class="seg tabs">${[['biblioteca', 'Ejercicios'], ['alimentos', 'Alimentos'], ['lecciones-admin', 'Lecciones']].map(([k, l]) => `<a class="${a === k ? 'on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
 function vAlimentos() {
   let cat = sessionStorage.getItem('food_cat') || '', q = '';
   const listHtml = () => {
