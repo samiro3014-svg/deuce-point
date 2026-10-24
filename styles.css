@@ -402,3 +402,28 @@ label.chip input { margin: 0; accent-color: var(--brand); }
 .rem-row { flex-wrap: wrap; }
 .rem-row .check { flex: 1 1 50%; }
 .rem-row .time-in { width: 132px; }
+
+/* ---------- v6: rendimiento en tenis ---------- */
+.badge.low { color: var(--brand); border-color: #b9cde0; background: #e7f0f8; }
+b.ok { color: #4d8a1c; } b.warnb { color: #9a5b00; } b.low { color: var(--brand); }
+.well-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 0; font-size: 14px; }
+.well-row span { flex: 1; }
+.chips.scale5 { flex-wrap: nowrap; gap: 4px; }
+.chips.scale5 .chip { width: 36px; padding: 6px 0; text-align: center; }
+.chips.scale11 { display: grid; grid-template-columns: repeat(11, 1fr); gap: 3px; }
+.chips.scale11 .chip { padding: 7px 0; text-align: center; min-width: 0; font-size: 13px; }
+.well-done { display: flex; align-items: center; gap: 12px; }
+.well-done > div { display: flex; flex-direction: column; }
+.light { width: 18px; height: 18px; border-radius: 50%; flex: none; background: var(--line); }
+.light.ok { background: #6FB232; } .light.warnb { background: #e3a21a; } .light.bad { background: var(--danger); }
+.pain-w { background: #fdecec; border-left: 4px solid var(--danger); color: #7a1d20; border-radius: 8px; padding: 8px 10px; font-size: 13px; margin: 6px 0; }
+.pain-w .btn { margin-top: 6px; }
+.bodymap { width: 100%; max-width: 360px; display: block; margin: 6px auto; }
+.bodymap .sil > * { fill: #e6ebe2; stroke: #c9d3c4; stroke-width: 1.5; }
+.bodymap .bz { fill: rgba(11, 64, 108, .18); stroke: var(--brand); stroke-width: 1.5; cursor: pointer; }
+.bodymap .bz.mk { fill: rgba(212, 60, 65, .35); stroke: var(--danger); }
+.bodymap .bz.on { fill: var(--danger); stroke: #7a1d20; }
+.bodymap .bm-t { font-size: 11px; fill: var(--muted); text-anchor: middle; }
+.card.pain.res { opacity: .7; }
+.rpe-card { border-left: 4px solid var(--accent); }
+.day-h > div > small { display: block; }

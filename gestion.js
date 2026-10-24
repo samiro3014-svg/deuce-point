@@ -266,7 +266,20 @@ async function reportData(cid, start, end) {
       proj = { ref, months: m, base: c.weight, lo, hi, real, status: real < lo - 0.3 ? 'below' : real > hi + 0.3 ? 'above' : 'in', goal: c.goal };
     }
   }
-  return { start, end, lastDay, nDays, weeks, w0, w1, weekW, wa0, wa1, f0, f1, plan, t: hasT ? t : null, logged: logged.length, avgM, adh, weekAdh, weekLogged, waterAvg, waterT: num(plan && plan.water_ml),
+  // Tenis: carga y pruebas físicas
+  let tennis = null;
+  if (!S.needsV6 && typeof loadData === 'function') {
+    try {
+      const L = await loadData(cid, daysBetween(start, todayStr()) + 35);
+      const tsIn = L.ts.filter(x => inP(x.log_date));
+      const weekLoad = weeks.map(w => { let v = 0; for (let d = w.s; d <= w.e; d = addDays(d, 1)) v += L.daily[d] || 0; return v; });
+      const ft = (await DB.select('fitness_tests', { eq: { client_id: cid }, order: 'test_date' })).filter(x => x.test_date <= end);
+      const fin = ft.filter(x => inP(x.test_date)); const fLast = fin[fin.length - 1] || null; const fPrev = fLast ? ft.filter(x => x.test_date < fLast.test_date).pop() || null : null;
+      const info = await clientInfo(cid);
+      if (tsIn.length || weekLoad.some(v => v) || fLast) tennis = { matches: tsIn.filter(x => x.kind === 'Partido').length, practices: tsIn.filter(x => x.kind !== 'Partido').length, minutes: tsIn.reduce((a, x) => a + num(x.minutes), 0), weekLoad, acwr: acwrAt(L, lastDay).ratio, fLast, fPrev, info };
+    } catch (e) { console.warn('report tennis', e); }
+  }
+  return { tennis, start, end, lastDay, nDays, weeks, w0, w1, weekW, wa0, wa1, f0, f1, plan, t: hasT ? t : null, logged: logged.length, avgM, adh, weekAdh, weekLogged, waterAvg, waterT: num(plan && plan.water_ml),
     sessions: wIn.length, planned, perWeek, weekSess, weekVol, volume: wIn.reduce((a, x) => a + num(x.total_volume), 0), avgDur: durs.length ? durs.reduce((a, b) => a + b, 0) / durs.length : 0, records, checkins: ckIn.length, scales, proj, goal: c ? c.goal : null };
 }
 const sgn = (v, u = '') => (v > 0 ? '+' : v < 0 ? '−' : '') + fmtN(Math.abs(v)) + u;
@@ -308,6 +321,15 @@ function reportDocHtml(client, rep, D, logo) {
     ${docBars(D.weekVol.map((v, i) => ({ label: wl(i), value: v, text: v >= 1000 ? r1(v / 1000) + ' t' : Math.round(v), hi: i === D.weekVol.length - 1 })), 0, 'Sin sesiones registradas en el periodo.')}
     <table class="doc-t"><tbody><tr><td>Sesiones realizadas</td><td class="n">${D.sessions}${D.planned ? ' de ' + D.planned + ' planificadas' : ''}</td></tr><tr><td>Volumen total</td><td class="n">${fmtInt(D.volume)} kg</td></tr><tr><td>Duración promedio</td><td class="n">${D.avgDur ? Math.round(D.avgDur) + ' min' : '—'}</td></tr></tbody></table>
     ${D.records.length ? `<h3>Mejoras de fuerza (1RM estimado)</h3><table class="doc-t"><thead><tr><th>Ejercicio</th><th class="n">Antes</th><th class="n">Periodo</th><th class="n">Cambio</th></tr></thead><tbody>${D.records.map(r => `<tr><td>${esc(r.name)}</td><td class="n">${fmtN(r.before)} kg</td><td class="n">${fmtN(r.after)} kg</td><td class="n">+${fmtN(r.pct)} %</td></tr>`).join('')}</tbody></table><p class="doc-sub">Estimación de Epley con la mejor serie de cada ejercicio, comparada con el mejor registro anterior al periodo.</p>` : ''}`;
+  if (D.tennis) {
+    const T = D.tennis; const z = acwrZone(T.acwr);
+    h += `<h2>Tenis y carga de entrenamiento</h2><table class="doc-t"><tbody><tr><td>Partidos / prácticas</td><td class="n">${T.matches} / ${T.practices}</td></tr><tr><td>Minutos de tenis</td><td class="n">${fmtInt(T.minutes)} min</td></tr><tr><td>Relación aguda:crónica al cierre</td><td class="n">${T.acwr == null ? '—' : fmtN(T.acwr)} · ${esc(z.label.split(':')[0])}</td></tr></tbody></table>
+      <p class="doc-sub">Carga semanal (RPE × minutos, fuerza y tenis).</p>${docBars(T.weekLoad.map((v, i) => ({ label: wl(i), value: v, text: Math.round(v), hi: i === T.weekLoad.length - 1 })), 0, 'Sin sesiones con RPE en el periodo.')}`;
+    if (T.fLast) {
+      const age = ageFrom(T.info.d.fecha_nac);
+      h += `<h3>Pruebas físicas (${esc(fmtDayMonth(T.fLast.test_date))})</h3><table class="doc-t"><thead><tr><th>Prueba</th><th class="n">Resultado</th><th class="n">Anterior</th><th class="n">Referencia</th></tr></thead><tbody>${FIT_TESTS.filter(([k]) => num((T.fLast.results || {})[k])).map(([k, l, u, lower]) => { const v = num(T.fLast.results[k]), pv = T.fPrev ? num((T.fPrev.results || {})[k]) : 0, ref = fitRef(k, T.info.sex, age); return `<tr><td>${esc(l)}</td><td class="n"><b>${fmtN(v)} ${u}</b></td><td class="n">${pv ? fmtN(pv) + ' ' + u : '—'}</td><td class="n">${ref ? fmtN(ref.value) + ' (' + ref.group + ')' : '—'}</td></tr>`; }).join('')}</tbody></table><p class="doc-sub">Referencias: ${esc(FIT_SOURCE)}</p>`;
+    }
+  }
   if (D.scales.length) h += `<h2>Bienestar (check-ins semanales)</h2><p class="doc-sub">Promedio de ${D.checkins} ${D.checkins === 1 ? 'check-in' : 'check-ins'} en escala de 1 a 10.</p>${docHBars(D.scales.map(s => ({ label: s.label, value: s.value, text: fmtN(s.value) + '/10' })), 10)}`;
   if ((rep.comment || '').trim()) h += `<h2>Comentarios del entrenador</h2><p class="pre">${esc(rep.comment.trim())}</p>`;
   if ((rep.goals || '').trim()) h += `<h2>Objetivos para el próximo mes</h2><div class="box pre">${esc(rep.goals.trim())}</div>`;

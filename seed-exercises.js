@@ -148,5 +148,16 @@ window.SEED_FAMILIES = [
   // CARDIO ZONA 2
   { g: 'Cardio', f: 'Cardio Zona 2', x: [
     ['Caminata inclinada en banda (Zona 2)', 'Máquina'], ['Bicicleta estática (Zona 2)', 'Máquina'], ['Elíptica (Zona 2)', 'Máquina'],
-    ['Remo ergómetro (Zona 2)', 'Máquina'], ['Caminata al aire libre (Zona 2)', 'Peso corporal']] }
+    ['Remo ergómetro (Zona 2)', 'Máquina'], ['Caminata al aire libre (Zona 2)', 'Peso corporal']] },
+  // PREVENCIÓN (tenis)
+  { g: 'Prevención', f: 'Prevención de hombro', x: [
+    ['Rotación externa a 90° con banda', 'Banda'], ['Estiramiento posterior de hombro (sleeper)', 'Peso corporal']] },
+  { g: 'Prevención', f: 'Prevención de codo y muñeca', x: [
+    ['Excéntrico de extensión de muñeca', 'Mancuernas'], ['Torsión inversa con barra flexible', 'Barra flexible'],
+    ['Desviación radial y cubital con martillo', 'Mancuernas'], ['Apretón de pelota', 'Pelota']] },
+  { g: 'Prevención', f: 'Prevención de tobillo', x: [
+    ['Equilibrio monopodal', 'Peso corporal'], ['Elevación de talones excéntrica en escalón', 'Peso corporal'],
+    ['Saltos de tobillo (pogo)', 'Peso corporal'], ['Alcance en Y monopodal', 'Peso corporal']] },
+  { g: 'Prevención', f: 'Prevención de aductores', x: [
+    ['Plancha de Copenhague', 'Peso corporal'], ['Aducción de cadera en polea', 'Polea']] }
 ];

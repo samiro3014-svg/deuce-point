@@ -304,12 +304,20 @@ async function vHoy(date, cid) {
   const choices = (daily && daily.choices) || {};
   // Tipo de día (ciclado de carbohidratos)
   let dayType = null, rf = 1;
-  if (cycles(plan)) {
+  const tday = plan && hasT && typeof tournamentDay === 'function' ? await tournamentDay(cid, date, plan).catch(() => null) : null;
+  const dayOpts = [['train', 'Día de entreno']].concat(cycles(plan) ? [['rest', 'Día de descanso']] : [], tday ? [[tday.type, tday.label]] : []);
+  if (cycles(plan) || tday) {
     const ws = await DB.select('workouts', { eq: { client_id: cid }, gte: { started_at: parseDay(addDays(date, -1)).toISOString() }, limit: 20 });
     const trained = ws.some(w => dateStr(new Date(w.started_at)) === date);
-    dayType = choices.__day || ((plan.train_days || []).includes(WEEKDAYS[parseDay(date).getDay()]) || trained ? 'train' : 'rest');
+    const auto = tday ? tday.type : ((plan.train_days || []).includes(WEEKDAYS[parseDay(date).getDay()]) || trained || !cycles(plan) ? 'train' : 'rest');
+    dayType = dayOpts.some(o => o[0] === choices.__day) ? choices.__day : auto;
     if (dayType === 'rest') { t = restTargets(plan, t); rf = restFactor(plan); }
+    else if (tday && dayType === tday.type) { t = Object.assign({}, t, { carbs: tday.carbs, kcal: t.kcal + (tday.carbs - t.carbs) * 4 }); rf = carbFactor(plan, tday.carbs); }
   }
+  // Partidos y práctica de tenis: gasto adicional del día
+  const tk = hasT && typeof tennisKcal === 'function' ? await tennisKcal(cid, date) : { kcal: 0, rows: [] };
+  if (tday && dayType === tday.type) tk.kcal = 0;   // en días de torneo la meta de carbohidratos en g/kg ya cubre el gasto del partido
+  if (tk.kcal) t = Object.assign({}, t, { kcal: t.kcal + tk.kcal, carbs: t.carbs + Math.round(tk.kcal * 0.7 / 4), fat: t.fat + Math.round(tk.kcal * 0.3 / 9) });
   const peri = dayType === 'train' && plan && plan.peri_meals ? plan.peri_meals : null;
   const water = num(daily && daily.water_ml), waterT = num(plan && plan.water_ml) || 2500;
   const left = hasT ? t.kcal - tot.kcal : 0;
@@ -318,8 +326,10 @@ async function vHoy(date, cid) {
   let html = '';
   if (own && isToday) html += `<p class="muted hello">Hola, ${esc(firstName(S.profile.full_name))}</p>`;
   html += `<div class="datebar"><a class="icon-btn" href="${base}${addDays(date, -1)}" aria-label="Día anterior">‹</a><b>${isToday ? 'Hoy · ' + esc(fmtDayLong(date).toLowerCase()) : esc(fmtDayLong(date))}</b><a class="icon-btn" href="${base}${addDays(date, 1)}" aria-label="Día siguiente">›</a></div>`;
-  if (dayType) html += `<div class="seg daytype"><button class="${dayType === 'train' ? 'on' : ''}" data-act="dayT" data-v="train">Día de entreno</button><button class="${dayType === 'rest' ? 'on' : ''}" data-act="dayT" data-v="rest">Día de descanso</button></div>
-    ${dayType === 'rest' ? `<p class="small muted">Día de descanso: ${fmtInt(num(plan.carbs_g) - num(plan.rest_carbs_g))} g menos de carbohidratos; las porciones del grupo de cereales, tubérculos y frutas ya están ajustadas.</p>` : ''}`;
+  if (dayType) html += `<div class="seg daytype">${dayOpts.map(([k, l]) => `<button class="${dayType === k ? 'on' : ''}" data-act="dayT" data-v="${k}">${l}</button>`).join('')}</div>
+    ${dayType === 'rest' ? `<p class="small muted">Día de descanso: ${fmtInt(num(plan.carbs_g) - num(plan.rest_carbs_g))} g menos de carbohidratos; las porciones del grupo de cereales, tubérculos y frutas ya están ajustadas.</p>` : ''}
+    ${tday && dayType === tday.type ? `<p class="small muted">${esc(tday.t.name)}: carbohidratos ${fmtInt(tday.carbs)} g (${fmtN(tday.gkg)} g/kg); las porciones de cereales, tubérculos y frutas ya están aumentadas. <a href="${own ? '#/rendimiento/torneos' : `#/asesorado/${cid}/rendimiento/torneos`}">Protocolo del día de partido</a></p>` : ''}`;
+  if (tk.rows.length) html += `<p class="small muted">Tenis hoy: ${tk.rows.map(r => `${r.kind.toLowerCase()} de ${r.minutes} min`).join(', ')} · gasto estimado ${fmtInt(tk.gross)} kcal${tk.kcal ? ` · +${fmtInt(tk.kcal)} kcal sumadas al objetivo (70 % carbohidratos, 30 % grasa)${tk.assumed ? `; el plan ya incluye ${String(tk.assumed).replace('.', ',')} sesiones por semana` : ''}` : tday && dayType === tday.type ? ' · cubierto por la meta de carbohidratos del día de torneo' : ''}.</p>`;
   if (own && isToday && S.profile.goal) html += `<div class="goal"><small>Objetivo</small>${esc(S.profile.goal)}</div>`;
   html += `<div class="card sum">
     <div class="sum-top"><div><b>${fmtInt(tot.kcal)}</b><small>Consumidas</small></div>
@@ -330,6 +340,7 @@ async function vHoy(date, cid) {
   html += `<div class="card"><div class="mb-h"><span>Agua</span><span><b>${(water / 1000).toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b> / ${(waterT / 1000).toLocaleString('es-CO', { maximumFractionDigits: 1 })} L</span></div>
     <div class="mb-t"><div class="mb-f w" style="width:${Math.min(100, water / waterT * 100).toFixed(1)}%"></div></div>
     <div class="row-btns"><button class="btn sm" data-act="water" data-d="-250">− 250 ml</button><button class="btn sm primary" data-act="water" data-d="250">+ 250 ml</button><button class="btn sm" data-act="water" data-d="500">+ 500 ml</button></div></div>`;
+  if (own && isToday && typeof wellnessCardHtml === 'function') html += await wellnessCardHtml();
   if (own && isToday) html += await workoutCardHtml(cid);
   if (own && isToday && typeof checkinCardsHtml === 'function' && !S.needsMigration) html += await checkinCardsHtml(cid).catch(() => '');
   if (own && isToday && typeof clientMembershipCard === 'function') html += (await clientMembershipCard()) + (await clientReportCard());
@@ -381,6 +392,7 @@ async function vHoy(date, cid) {
   paint(html, {
     click: {
       water: async el => { await upsertDaily(cid, date, { water_ml: Math.max(0, water + num(el.dataset.d)) }); rerender(); },
+      ...(typeof wellnessHandlers === 'function' ? wellnessHandlers(rerender) : {}),
       dayT: async el => { await upsertDaily(cid, date, { choices: Object.assign({}, choices, { __day: el.dataset.v }) }); rerender(); },
       startWk: el => startWorkout(el.dataset.id),
       opt: async el => { await upsertDaily(cid, date, { choices: Object.assign({}, choices, { [el.dataset.meal]: el.dataset.opt }) }); rerender(); },
@@ -599,7 +611,7 @@ async function adherenceSection(cid, dayLink) {
 }
 
 /* Pestañas de Progreso del asesorado */
-const progSeg = a => `<div class="chips scroll tabs2">${[['historial', 'Entrenamiento'], ['progreso', 'Ejercicios'], ['cuerpo', 'Cuerpo'], ['adherencia', 'Nutrición'], ['fotos', 'Fotos']].map(([k, l]) => `<a class="chip${a === k ? ' on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
+const progSeg = a => `<div class="chips scroll tabs2">${[['historial', 'Entrenamiento'], ['progreso', 'Ejercicios'], ['rendimiento', 'Rendimiento'], ['cuerpo', 'Cuerpo'], ['adherencia', 'Nutrición'], ['fotos', 'Fotos']].map(([k, l]) => `<a class="chip${a === k ? ' on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
 async function vCuerpo() { const b = await bodySection(S.profile.id); const pj = S.intake && S.intake.status === 'approved' && typeof projectionHtml === 'function' ? projectionHtml(S.intake.calc) : ''; paint(progSeg('cuerpo') + b.html + pj, { click: b.click }, 'Progreso'); }
 async function vAdherencia() { const a = await adherenceSection(S.profile.id, d => '#/hoy/' + d); paint(progSeg('adherencia') + a.html, {}, 'Progreso'); }
 

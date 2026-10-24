@@ -8,7 +8,7 @@
 const CFG = window.APP_CONFIG || {};
 const BRAND = Object.assign({ name: 'Tu Marca', short: 'TM', tagline: 'Entrenamiento personalizado', primary: '#E4572E', logo: '' }, CFG.BRAND || {});
 const DEMO = !CFG.SUPABASE_URL || !CFG.SUPABASE_ANON_KEY;
-const MUSCLES = ['Pecho', 'Espalda', 'Hombros', 'Bíceps', 'Tríceps', 'Cuádriceps', 'Isquiotibiales', 'Glúteos', 'Pantorrillas', 'Core', 'Antebrazo', 'Potencia', 'Manguito rotador'];
+const MUSCLES = ['Pecho', 'Espalda', 'Hombros', 'Bíceps', 'Tríceps', 'Cuádriceps', 'Isquiotibiales', 'Glúteos', 'Pantorrillas', 'Core', 'Antebrazo', 'Potencia', 'Manguito rotador', 'Prevención'];
 let sb = null;
 const S = { profile: null, exercises: [], exById: {}, tick: null };
 
@@ -48,7 +48,7 @@ async function safe(fn) { try { await fn(); } catch (err) { console.error(err); 
 /* =====================================================================
    Capa de datos (Supabase o demo local)
    ===================================================================== */
-const DEMO_KEY = 'dp_demo_db_v3';
+const DEMO_KEY = 'dp_demo_db_v4';
 let demoData = null;
 function dd() {
   if (demoData) return demoData;
@@ -66,7 +66,7 @@ function matchRow(row, o) {
 const CASCADE = {
   routines: [['routine_days', 'routine_id']], routine_days: [['routine_exercises', 'day_id']], workouts: [['workout_sets', 'workout_id']],
   nutrition_plans: [['plan_meals', 'plan_id']], plan_meals: [['plan_options', 'meal_id']], plan_options: [['plan_items', 'option_id']],
-  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id']]
+  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id'], ['tennis_sessions', 'client_id'], ['wellness', 'client_id'], ['tournaments', 'client_id'], ['sweat_tests', 'client_id'], ['fitness_tests', 'client_id'], ['pain_reports', 'client_id']]
 };
 const RESTRICT = { exercises: [['routine_exercises', 'exercise_id'], ['workout_sets', 'exercise_id']], foods: [['plan_items', 'food_id']] };
 function cascadeDelete(d, table, id) {
@@ -189,6 +189,7 @@ function buildDemoData() {
   }
   if (window.buildNutritionDemo) buildNutritionDemo(d);
   if (window.buildAutoDemo) buildAutoDemo(d);
+  if (window.buildTenisDemo) buildTenisDemo(d);
   return d;
 }
 
@@ -305,7 +306,7 @@ function setActiveNav(name) {
   const coach = S.profile.role === 'coach';
   const map = coach
     ? { '': 'asesorados', asesorado: 'asesorados', rutina: 'asesorados', resumen: 'asesorados', diario: 'asesorados', 'plan-nutri': 'asesorados', 'plan-ver': 'asesorados', compras: 'asesorados', ajustes: 'asesorados', informe: 'asesorados', ejercicio: 'biblioteca', alimentos: 'biblioteca', alimento: 'biblioteca', videos: 'biblioteca' }
-    : { '': 'hoy', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', fotos: 'historial', 'plan-ver': 'hoy', compras: 'hoy', checkin: 'hoy', valoracion: 'perfil', informe: 'perfil', informes: 'perfil', recordatorios: 'perfil' };
+    : { '': 'hoy', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', fotos: 'historial', rendimiento: 'historial', 'plan-ver': 'hoy', compras: 'hoy', checkin: 'hoy', valoracion: 'perfil', informe: 'perfil', informes: 'perfil', recordatorios: 'perfil' };
   const key = map[name] ?? name;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.nav === key));
   const pill = document.getElementById('live-pill');
@@ -354,6 +355,7 @@ async function route() {
     if (name === 'historial') return paint(progSeg('historial') + await historialHtml(S.profile.id), {}, 'Progreso');
     if (name === 'progreso') return await vProgreso(S.profile.id, '#/progreso', a, 'Progreso', progSeg('progreso'));
     if (name === 'cuerpo') return await vCuerpo();
+    if (name === 'rendimiento') return await vRendimiento(a);
     if (name === 'adherencia') return await vAdherencia();
     if (name === 'plan-ver') return await vPlanDoc(a);
     if (name === 'compras') return await vCompras(a, b);
@@ -478,6 +480,8 @@ async function vPlan() {
   const thisWeek = recent.filter(w => w.started_at >= weekStart);
 
   let html = '';
+  const tp = typeof taperInfo === 'function' ? await taperInfo(cid).catch(() => null) : null;
+  if (tp) html += `<div class="warn-box small">${esc(tp.text)}</div>`;
   if (draft) html += `<div class="card live"><div><b>Sesión en curso</b><div class="small">${esc(draft.day_name || 'Sesión libre')} · iniciada ${new Date(draft.started_at).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div></div><a class="btn primary" href="#/entreno">Continuar</a></div>`;
   html += `<div class="stats3"><div><b>${thisWeek.length}</b><small>Sesiones esta semana</small></div><div><b>${fmtKg(thisWeek.reduce((a, w) => a + num(w.total_volume), 0))}</b><small>Volumen semanal</small></div><div><b>${recent.length ? fmtDateShort(recent[0].started_at) : '—'}</b><small>Última sesión</small></div></div>`;
 
@@ -512,7 +516,9 @@ async function startWorkout(dayId) {
       sets: Array.from({ length: Math.max(1, r.sets || 1) }, () => ({ w: '', r: '', rir: '', done: false }))
     }));
     await attachPrevious(draft.exercises);
+    if (typeof taperInfo === 'function') { const tp = await taperInfo(S.profile.id).catch(() => null); if (tp) applyTaper(draft, tp); }
   }
+  if (typeof activePains === 'function') draft.pains = (await activePains(S.profile.id)).map(p => ({ zone: p.zone, side: p.side, intensity: p.intensity }));
   saveDraft(draft);
   location.hash = '#/entreno';
 }
@@ -556,6 +562,7 @@ function exCard(e, ei) {
     ${orig ? `<div class="swapped">Sustituye a: ${esc(orig.name)}</div>` : ''}
     ${tline ? `<div class="target">Objetivo: ${esc(tline)}</div>` : ''}
     ${hint ? `<div class="hint${hint.up ? ' up' : ''}">${esc(hint.text)}</div>` : ''}
+    ${(() => { const pn = typeof painFor === 'function' ? painFor(e.exercise_id, S.curPains) : null; return pn ? `<div class="pain-w">Molestia en ${esc((PAIN_ZONES[pn.zone] || '').toLowerCase())}${pn.side && pn.side !== 'Centro' ? ' ' + esc(pn.side.toLowerCase()) : ''} (${pn.intensity}/10): este ejercicio carga la zona. Usa una alternativa sin dolor o quítalo de la sesión. <button class="btn sm" data-act="painAlt" data-ei="${ei}">Alternativas</button></div>` : ''; })()}
     ${t.notes ? `<div class="note">${esc(t.notes)}</div>` : ''}
     <div class="set-grid set-head"><span>Serie</span><span>Anterior</span><span>${ex.muscle_group === 'Cardio' ? '—' : 'kg'}</span><span>${ex.muscle_group === 'Cardio' ? 'Min' : ex.muscle_group === 'Movilidad' ? 'Reps/s' : 'Reps'}</span><span>RIR</span><span></span></div>
     ${e.sets.map((s, si) => {
@@ -581,7 +588,8 @@ function exCard(e, ei) {
 function vEntreno() {
   const d = getDraft();
   if (!d) { location.hash = '#/plan'; return; }
-  const html = `
+  S.curPains = d.pains || [];
+  const html = `${d.taper ? `<div class="warn-box small">${esc(d.taper)}</div>` : ''}
     <div class="wk-head">
       <div class="wk-stats"><span><b id="wk-time">0:00</b><small>Duración</small></span><span><b id="wk-vol">0 kg</b><small>Volumen</small></span><span><b id="wk-sets">0</b><small>Series</small></span></div>
       <button class="btn primary" data-act="finish">Finalizar</button>
@@ -615,6 +623,10 @@ function vEntreno() {
       delSet: el => { const dr = getDraft(); const e = dr.exercises[+el.dataset.ei]; if (e.sets.length <= 1) return; if (e.sets[e.sets.length - 1].done && !confirm('La última serie ya está completada. ¿Eliminarla?')) return; e.sets.pop(); saveDraft(dr); vEntreno(); },
       removeEx: el => { if (!confirm('¿Quitar este ejercicio de la sesión?')) return; mut(dr => dr.exercises.splice(+el.dataset.ei, 1)); },
       swap: el => swapModal(+el.dataset.ei),
+      painAlt: el => {
+        const ei = +el.dataset.ei; const base = S.exById[getDraft().exercises[ei].exercise_id];
+        pickExercise('Alternativa sin carga en la zona', async id => { const dr = getDraft(); dr.exercises[ei].exercise_id = id; await attachPrevious([dr.exercises[ei]]); saveDraft(dr); vEntreno(); toast('Ejercicio sustituido'); }, { group: base && base.muscle_group, filter: x => !painFor(x.id, S.curPains) });
+      },
       info: el => exInfoModal(el.dataset.id),
       addEx: () => pickExercise('Añadir ejercicio', async id => {
         const dr = getDraft();
@@ -671,7 +683,7 @@ function pickExercise(title, onPick, opts = {}) {
   const groups = [...new Set([...MUSCLES, ...S.exercises.map(e => e.muscle_group)])];
   const renderList = () => {
     const ql = norm(q);
-    const list = S.exercises.filter(e => (!g || e.muscle_group === g) && (!ql || norm(e.name + ' ' + (e.equipment || '') + ' ' + (e.family || '')).includes(ql))).slice(0, 250);
+    const list = S.exercises.filter(e => (!opts.filter || opts.filter(e)) && (!g || e.muscle_group === g) && (!ql || norm(e.name + ' ' + (e.equipment || '') + ' ' + (e.family || '')).includes(ql))).slice(0, 250);
     $('#pk-list').innerHTML = list.map(e => `<button class="pick-item" data-act="pick" data-id="${e.id}"><b>${esc(e.name)}</b><small>${esc(e.muscle_group)} · ${esc(e.equipment || '')}</small></button>`).join('') || '<p class="muted small">Sin resultados.</p>';
   };
   modal(`${modalHead(title)}
@@ -764,7 +776,8 @@ async function vResumen(id) {
   const html = `
     <p class="muted">${esc(client ? client.full_name + ' · ' : '')}${esc(w.day_name || 'Sesión libre')} · ${fmtDate(w.started_at)}</p>
     <div class="stats3"><div><b>${fmtKg(vol)}</b><small>Volumen total</small></div><div><b>${sets.length}</b><small>Series</small></div><div><b>${w.finished_at ? fmtDur(new Date(w.finished_at) - new Date(w.started_at)) : '—'}</b><small>Duración</small></div></div>
-    <p class="small muted center">${reps} repeticiones totales</p>
+    <p class="small muted center">${reps} repeticiones totales${w.rpe != null ? ` · esfuerzo ${w.rpe}/10 · carga ${fmtInt(w.load)} UA` : ''}</p>
+    ${typeof rpeCardHtml === 'function' ? rpeCardHtml(w) : ''}
     ${prs.length ? `<div class="card pr"><h3>Nuevos récords</h3><ul class="plain">${prs.map(p => `<li>${esc(p)}</li>`).join('')}</ul></div>` : ''}
     <div class="card"><h3>Volumen por grupo muscular (kg)</h3>${hbars(Object.entries(byMuscle).sort((a, b) => b[1].vol - a[1].vol).map(([g, v]) => ({ label: g, value: v.vol, text: fmtKg(v.vol) })))}</div>
     <div class="card"><h3>Series por grupo muscular</h3>${hbars(Object.entries(byMuscle).sort((a, b) => b[1].sets - a[1].sets).map(([g, v]) => ({ label: g, value: v.sets, text: v.sets + ' series' })))}</div>
@@ -773,6 +786,7 @@ async function vResumen(id) {
     <div class="row-btns"><button class="btn" data-act="back">Volver</button>${S.profile.role === 'coach' || w.client_id === S.profile.id ? '<button class="btn danger-outline" data-act="del">Eliminar sesión</button>' : ''}</div>`;
   paint(html, {
     click: {
+      rpe: el => rpeHandler(w)(el),
       back: () => { if (S.profile.role === 'coach') location.hash = '#/asesorado/' + w.client_id + '/historial'; else location.hash = '#/historial'; },
       del: async () => { if (!confirm('¿Eliminar esta sesión y todas sus series? Esta acción no se puede deshacer.')) return; await DB.remove('workouts', id); toast('Sesión eliminada'); history.back(); }
     }
@@ -925,7 +939,7 @@ async function vAsesorado(id, tab, sub) {
   if (!c) return paint('<div class="card"><p>Asesorado no encontrado.</p></div>');
   const base = '#/asesorado/' + id;
   const mh = typeof membershipHead === 'function' ? await membershipHead(c) : { html: '', click: {} };
-  const tabs = `<div class="chips scroll tabs2">${[['valoracion', 'Valoración'], ['rutinas', 'Entreno'], ['nutricion', 'Nutrición'], ['seguimiento', 'Seguimiento'], ['checkins', 'Check-ins'], ['informes', 'Informes'], ['fotos', 'Fotos'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios']].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
+  const tabs = `<div class="chips scroll tabs2">${[['valoracion', 'Valoración'], ['rutinas', 'Entreno'], ['nutricion', 'Nutrición'], ['seguimiento', 'Seguimiento'], ['checkins', 'Check-ins'], ['rendimiento', 'Rendimiento'], ['informes', 'Informes'], ['fotos', 'Fotos'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios']].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
   const head = `<div class="card"><div class="day-h"><p class="small muted">${esc(c.email || '')}${c.phone ? ' · ' + esc(c.phone) : ''}</p>${waBtn(c.phone, `Hola ${firstName(c.full_name)}, `)}</div>
     <label class="field"><span>Objetivo del asesorado</span><textarea class="input" rows="2" data-goal placeholder="Ej.: Tenista juvenil · fuerza y potencia para la temporada">${esc(c.goal || '')}</textarea></label>
     ${mh.html}</div>`;
@@ -933,10 +947,10 @@ async function vAsesorado(id, tab, sub) {
   const handlers = { click: Object.assign({}, mh.click), change: async t => { if ('goal' in t.dataset) { await DB.update('profiles', id, { goal: t.value.trim() }); toast('Objetivo guardado'); } } };
 
   let after = null;
-  const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab, informes: typeof coachInformesTab === 'function' ? coachInformesTab : null };
+  const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab, informes: typeof coachInformesTab === 'function' ? coachInformesTab : null, rendimiento: typeof rendimientoTab === 'function' ? (cid, s) => rendimientoTab(cid, s, base + '/rendimiento') : null };
   if (tab === 'historial') body = await historialHtml(id);
   else if (MODS[tab]) {
-    const r = await MODS[tab](id);
+    const r = await MODS[tab](id, sub);
     body = r.html; Object.assign(handlers.click, r.click || {}); after = r.after || null;
     if (r.change) { const prev = handlers.change; handlers.change = async t => { if (!r.change(t)) await prev(t); }; }
   } else if (tab === 'progreso') {
@@ -1018,7 +1032,7 @@ async function vRutina(id) {
           </div>
           <input class="input" data-tbl="routine_exercises" data-id="${x.id}" data-f="notes" value="${esc(x.notes || '')}" placeholder="Indicaciones: tempo, técnica, progresión…">
         </div>`).join('')}
-        <button class="btn sm block" data-act="addEx" data-id="${d.id}" data-n="${items.length}">+ Añadir ejercicio</button>
+        <div class="row-btns"><button class="btn sm" data-act="addEx" data-id="${d.id}" data-n="${items.length}">+ Añadir ejercicio</button>${typeof preventionModal === 'function' ? `<button class="btn sm" data-act="addPrev" data-id="${d.id}" data-n="${items.length}">+ Bloque de prevención</button>` : ''}</div>
       </div>`;
     }).join('')}
     <button class="btn ghost block" data-act="addDay">+ Añadir día</button>
@@ -1043,6 +1057,7 @@ async function vRutina(id) {
       mvDay: el => reorder('routine_days', days.slice(), days.findIndex(d => d.id === el.dataset.id), +el.dataset.dir),
       mvEx: el => { const list = rex.filter(x => x.day_id === el.dataset.day); return reorder('routine_exercises', list, list.findIndex(x => x.id === el.dataset.id), +el.dataset.dir); },
       delEx: async el => { await DB.remove('routine_exercises', el.dataset.id); route(); },
+      addPrev: el => preventionModal(el.dataset.id, +el.dataset.n, route),
       chEx: el => pickExercise('Cambiar ejercicio', async exId => { await DB.update('routine_exercises', el.dataset.id, { exercise_id: exId }); route(); }),
       addEx: el => pickExercise('Añadir ejercicio', async exId => {
         await DB.insert('routine_exercises', { day_id: el.dataset.id, exercise_id: exId, position: +el.dataset.n, sets: 3, reps: '8-12', rir: '2', rest_seconds: 90, notes: '' }); route();

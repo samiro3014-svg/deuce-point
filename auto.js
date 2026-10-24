@@ -14,7 +14,7 @@ const ACT_LVL = ['Sedentario', 'Leve', 'Moderado', 'Intenso'];
 const FA_SEX = { M: [1.3, 1.6, 1.7, 2.1], F: [1.3, 1.5, 1.6, 1.9] };
 const RELIABLE_COMP = ['InBody o bioimpedancia profesional', 'Pliegues cutáneos', 'DEXA', 'Evaluación del entrenador'];
 const COMP_METHODS = ['InBody o bioimpedancia profesional', 'Pliegues cutáneos', 'DEXA', 'Báscula casera', 'No sé'];
-const SETTINGS_DEF = { auto_publish: false, loss_rate_pct: 0.75, deficit_min: 300, deficit_max: 750, recomp_deficit: 250, surplus_beg: 500, surplus_int: 350, surplus_adv: 250, protein_gkg: 2, fat_gkg: 0.9, rest_carb_cut: 125, rest_carb_min_gkg: 2, peri_carb_pct: 60, cardio_z2: true, adapt_weeks: 4, menu_source: 'generador', menu_options: 3, renew_days: 7 };
+const SETTINGS_DEF = { auto_publish: false, loss_rate_pct: 0.75, deficit_min: 300, deficit_max: 750, recomp_deficit: 250, surplus_beg: 500, surplus_int: 350, surplus_adv: 250, protein_gkg: 2, fat_gkg: 0.9, rest_carb_cut: 125, rest_carb_min_gkg: 2, peri_carb_pct: 60, cardio_z2: true, adapt_weeks: 4, menu_source: 'generador', menu_options: 3, renew_days: 7, match_carb_gkg: 7, pre_carb_gkg: 6, taper_days: 7, taper_pct: 60, sweat_na_mgl: 900, sweat_na_salty: 1500 };
 const DEFAULT_PLAN_NOTES = 'Pesar los alimentos en el estado indicado en el plan (cocido o crudo).\nDistribuir el agua indicada a lo largo del día.\nUsar la opción «Reemplazar» para cambiar un alimento por un equivalente del mismo grupo.';
 const DEFAULT_ROUTINE_NOTES = 'Calentamiento de 8 a 10 minutos: movilidad articular y 2 series de aproximación en el primer ejercicio.\nRIR: repeticiones que quedan en reserva al terminar la serie.\nProgresión: cuando completes el máximo de repeticiones en todas las series con el RIR indicado, aumenta la carga entre 2,5 y 5 %.';
 
@@ -136,6 +136,7 @@ async function loadSettings() {
   catch (e) { console.warn('app_settings no disponible: ejecutar supabase/migracion-v3.sql', e); S.needsMigration = true; }
   S.needsV4 = !(r && r.data && num(r.data.schema_version) >= 4);
   S.needsV5 = !(r && r.data && num(r.data.schema_version) >= 5);
+  S.needsV6 = !(r && r.data && num(r.data.schema_version) >= 6);
   S.settings = Object.assign({}, SETTINGS_DEF, r ? r.data || {} : {});
 }
 async function saveSettings(patch) {
@@ -1077,6 +1078,7 @@ async function inboxInner(clients) {
   phaseEnd.forEach(r => rows.push(`<div class="ib-row"><span class="ib-tag f">Fin de fase</span><a class="ib-n" href="#/asesorado/${r.client_id}/valoracion">${esc(byId[r.client_id].full_name || '')}</a><span class="ib-m"><button class="chip" data-act="ibPhase2" data-id="${r.client_id}">Generar Fase 2</button></span></div>`));
   recal.forEach(i => rows.push(`<a class="ib-row" href="#/asesorado/${i.client_id}/valoracion"><span class="ib-tag r">Recalibrar</span><span class="ib-n">${esc(byId[i.client_id].full_name || '')}</span><span class="ib-m">Recalibración mensual</span></a>`));
   if (typeof inboxManagementRows === 'function') rows.push(...await inboxManagementRows(byId, approved));
+  if (typeof inboxTenisRows === 'function') rows.push(...await inboxTenisRows(byId));
   intakes.filter(i => byId[i.client_id]).forEach(i => rows.push(`<a class="ib-row" href="#/asesorado/${i.client_id}/valoracion"><span class="ib-tag v">Valoración</span><span class="ib-n">${esc(byId[i.client_id].full_name || byId[i.client_id].email)}</span><span class="ib-m">${(i.flags || []).filter(f => f.level !== 'info').length ? `<span class="warn">${(i.flags || []).filter(f => f.level !== 'info').length} alertas</span>` : 'Sin alertas'}</span></a>`));
   cks.filter(c => byId[c.client_id]).forEach(c => rows.push(`<a class="ib-row" href="#/asesorado/${c.client_id}/checkins"><span class="ib-tag c">Check-in</span><span class="ib-n">${esc(byId[c.client_id].full_name || '')}</span><span class="ib-m">${fmtDM(parseDay(c.check_date))}</span></a>`));
   inactive.forEach(c => rows.push(`<div class="ib-row"><span class="ib-tag i">Inactivo</span><a class="ib-n" href="#/asesorado/${c.id}/seguimiento">${esc(c.full_name || c.email)}</a><span class="ib-m">${lastAct[c.id] ? daysBetween(lastAct[c.id], todayStr()) + ' días' : 'sin registros'} ${waBtn(c.phone, `Hola ${firstName(c.full_name)}, ¿cómo vas con tu plan esta semana? Recuerda registrar tus comidas y entrenamientos en Deuce Point.`, 'WhatsApp', 'chip wa')}</span></div>`));
@@ -1126,6 +1128,9 @@ async function vAjustes() {
     <div class="card"><h3>Textos por defecto</h3>
       <label class="field"><span>Indicaciones del plan nutricional</span><textarea class="input" rows="4" data-s="plan_notes">${esc(s.plan_notes || DEFAULT_PLAN_NOTES)}</textarea></label>
       <label class="field"><span>Indicaciones de la rutina</span><textarea class="input" rows="4" data-s="routine_notes">${esc(s.routine_notes || DEFAULT_ROUTINE_NOTES)}</textarea></label></div>
+    <div class="card"><h3>Torneos y periodización</h3><div class="rex-grid">${n('pre_carb_gkg', 'Carbs víspera g/kg')}${n('match_carb_gkg', 'Carbs día de torneo g/kg')}${n('taper_days', 'Días de descarga previa')}${n('taper_pct', '% de series en la descarga')}</div>
+      <p class="small muted">Valores por defecto: 6 g/kg la víspera, 7 g/kg en días de torneo, 7 días de descarga con el 60 % de las series (40 % durante el torneo).</p>
+      <h4>Hidratación</h4><div class="rex-grid">${n('sweat_na_mgl', 'Sodio en sudor mg/L')}${n('sweat_na_salty', 'Sudor salado mg/L')}</div></div>
     <div class="card"><h3>Membresías</h3><div class="rex-grid">${n('renew_days', 'Aviso de renovación (días antes)')}</div><p class="small muted">Las renovaciones próximas y vencidas aparecen en Pendientes con el mensaje de WhatsApp listo para enviar.</p></div>
     <div class="card"><h3>Contacto</h3><label class="field"><span>Tu número de WhatsApp</span><input class="input" data-s="whatsapp" inputmode="tel" value="${esc(s.whatsapp || '')}" placeholder="3001234567"></label><p class="small muted">Se muestra a los asesorados para escribirte directamente.</p></div>
     ${typeof coachKeyCardHtml === 'function' ? await coachKeyCardHtml() : ''}`, {
@@ -1169,7 +1174,7 @@ function buildAutoDemo(d) {
   const ana = d.profiles.find(p => p.id === 'demo-ana'), juan = d.profiles.find(p => p.id === 'demo-juan');
   if (ana) ana.phone = '3001112233'; if (juan) juan.phone = '3004445566';
   const tpl = d.nutrition_plans.find(p => p.is_template);
-  d.app_settings.push({ id: 1, data: Object.assign({}, SETTINGS_DEF, { whatsapp: '3009998877', tpl_default: tpl ? tpl.id : '', schema_version: 5 }), updated_at: iso });
+  d.app_settings.push({ id: 1, data: Object.assign({}, SETTINGS_DEF, { whatsapp: '3009998877', tpl_default: tpl ? tpl.id : '', schema_version: 6 }), updated_at: iso });
   d.memberships.push({ client_id: 'demo-juan', plan_name: 'Mensual', start_date: addDays(today, -27), end_date: addDays(today, 3), amount: 180000, notes: 'Pago por transferencia', archived: false, updated_at: iso },
     { client_id: 'demo-ana', plan_name: 'Trimestral', start_date: addDays(today, -42), end_date: addDays(today, 48), amount: null, notes: null, archived: false, updated_at: iso });
   const base = { ciudad: 'Bogotá', trabajo: 'Sentado la mayor parte del día', pq1: 'No', pq2: 'No', pq3: 'No', pq4: 'No', pq5: 'No', pq6: 'No', pq7: 'No', enfermedades: ['Ninguna'], sc1: 'No', sc2: 'No', sc3: 'No', sc4: 'No', sc5: 'No', restricciones: ['Ninguna'], sueno: '7 a 8', lugar: 'Gimnasio', minutos: '60 min', consentimiento: 'Sí', datos: 'Sí', importancia: '9' };
