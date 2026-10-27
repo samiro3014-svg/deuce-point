@@ -136,9 +136,11 @@ const API_PRICE = { 'claude-sonnet-5-5': [2, 10], 'claude-opus-5-5': [4, 20], 'c
 async function aiConvert(text) {
   if (DEMO) throw new Error('La conversión con IA requiere la conexión con Supabase (no funciona en modo demostración).');
   const catalog = S.foods.map(f => f.name).join('; ');
-  const { data, error } = await sb.functions.invoke('convertir-plan', { body: { text: String(text).slice(0, 150000), catalog, spec: ANNEX_SPEC } });
+  let { data, error } = await sb.functions.invoke('convertir-plan', { body: { text: String(text).slice(0, 150000), catalog, spec: ANNEX_SPEC } });
   if (error) { let m = error.message; try { const j = await error.context.json(); if (j && j.error) m = j.error; } catch (e) { } throw new Error(/not found|404/i.test(m) ? 'La función «convertir-plan» no está publicada en Supabase. Revisa la guía de activación.' : m); }
-  if (!data || !data.text) throw new Error('La IA no devolvió datos.');
+  if (typeof data === 'string') { try { data = JSON.parse(data); } catch (e) { throw new Error('Respuesta no válida de la función: ' + data.slice(0, 160)); } }
+  if (data && data.error) throw new Error(data.error);
+  if (!data || !data.text) throw new Error('La IA no devolvió datos' + (data && data.stop ? ` (motivo: ${data.stop})` : '') + '. Revisa Supabase › Edge Functions › convertir-plan › Logs.');
   const md = String(data.model || ''); const pr = /opus/.test(md) ? API_PRICE['claude-opus-5-5'] : /haiku/.test(md) ? API_PRICE['claude-haiku-5-5'] : API_PRICE['claude-sonnet-5-5']; const u = data.usage || {};
   const usd = (num(u.input_tokens) * pr[0] + num(u.output_tokens) * pr[1]) / 1e6;
   return { text: data.text, usage: { input: num(u.input_tokens), output: num(u.output_tokens), usd, model: data.model, cut: data.stop === 'max_tokens' } };

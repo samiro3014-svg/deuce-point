@@ -42,12 +42,16 @@ Deno.serve(async (req) => {
       headers: { 'x-api-key': KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
         model: MODEL, max_tokens: 16000, system,
+        thinking: { type: 'disabled' },   // la conversión es una transcripción: todo el presupuesto de tokens va a la respuesta
         messages: [{ role: 'user', content: `Catálogo de alimentos de la aplicación (usa estos nombres cuando haya equivalente; los demás van con ALIMENTO_NUEVO): ${String(catalog || '').slice(0, 20000)}\n\nInforme:\n${doc}` }]
       })
     });
     const out = await r.json();
     if (!r.ok) return json({ error: 'API de Anthropic: ' + (out?.error?.message || r.status) }, 502);
+    const types = (out.content || []).map((c: any) => c.type);
     const txt = (out.content || []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
+    console.log(JSON.stringify({ model: out.model, stop: out.stop_reason, usage: out.usage, types, chars: txt.length, input_chars: doc.length }));
+    if (!txt.trim()) return json({ error: `La IA terminó sin texto (motivo: ${out.stop_reason || 'desconocido'}; bloques: ${types.join(', ') || 'ninguno'}; tokens de salida: ${out.usage?.output_tokens ?? 0}).`, usage: out.usage, model: out.model || MODEL, stop: out.stop_reason }, 502);
     return json({ text: txt, usage: out.usage, model: out.model || MODEL, stop: out.stop_reason });
   } catch (e) {
     return json({ error: String((e as Error)?.message || e) }, 500);
