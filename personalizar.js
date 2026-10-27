@@ -81,7 +81,8 @@ async function habitGoalCtx(cid, rep) {
   };
 }
 function goalState(g, ctx) {
-  const a = goalAuto(g); const cur = a && ctx.auto[a] != null ? ctx.auto[a] : (g.current != null && g.current !== '' ? num(g.current) : null);
+  const a = goalAuto(g); let cur = a && ctx.auto[a] != null ? ctx.auto[a] : (g.current != null && g.current !== '' ? num(g.current) : null);
+  if (a === 'agua' && cur != null && /ml/i.test(g.unit || '')) cur = Math.round(cur * 1000);   // el registro automático está en litros
   const s = num(g.start), t = num(g.target);
   let p = null; if (cur != null && t !== s) p = Math.max(0, Math.min(1, (cur - s) / (t - s))); else if (cur != null && t === s) p = cur === t ? 1 : 0;
   return { cur, p, auto: !!a };
