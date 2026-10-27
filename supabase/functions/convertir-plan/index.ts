@@ -42,7 +42,9 @@ Deno.serve(async (req) => {
       headers: { 'x-api-key': KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
         model: MODEL, max_tokens: 16000, system,
-        thinking: { type: 'disabled' },   // la conversión es una transcripción: todo el presupuesto de tokens va a la respuesta
+        // Sin razonamiento previo: la conversión es una transcripción y todo el presupuesto de tokens va a la respuesta.
+        // En los modelos actuales se indica con «between_tools» (con ANTHROPIC_THINKING=disabled se usa el valor anterior).
+        thinking: { type: Deno.env.get('ANTHROPIC_THINKING') || 'between_tools' },
         messages: [{ role: 'user', content: `Catálogo de alimentos de la aplicación (usa estos nombres cuando haya equivalente; los demás van con ALIMENTO_NUEVO): ${String(catalog || '').slice(0, 20000)}\n\nInforme:\n${doc}` }]
       })
     });
