@@ -329,6 +329,7 @@ async function vCompetencia(tid) {
     <div class="card"><h3>Protocolo del día</h3>${rows.map(r => `<div class="tl-row"><b>${r.at != null ? fmt(r.at) : r.off === 0 ? 'Inicio' : r.off === null ? 'Al terminar' : '—'}</b><span>${esc(r.s)}</span></div>`).join('')}
       ${smin == null ? '<p class="small muted">Escribe la hora de inicio para ver la hora de cada paso.</p>' : ''}</div>
     ${smin != null ? '<button class="btn primary block" data-act="cpIcs">Agregar alarmas al calendario</button>' : ''}
+    ${S.needsV10 ? '' : '<div class="row-btns"><a class="btn" href="#/movilidad/ramp">Calentamiento guiado (12 min)</a><a class="btn" href="#/snacks">Refrigerios de torneo</a><a class="btn" href="#/movilidad/post">Recuperación</a></div>'}
     <p class="small muted">El protocolo sale de tu plan integral. Si cambia la hora de inicio, actualízala aquí.</p>`, {
     change: el => { if (el.id === 'cp-h') { lsSet(key, el.value); vCompetencia(t.id); } },
     click: {

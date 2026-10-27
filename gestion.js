@@ -383,6 +383,7 @@ async function coachInformesTab(cid) {
   const reps = S.needsV5 ? [] : await DB.select('reports', { eq: { client_id: cid }, order: 'period_end', asc: false });
   const client = (await DB.select('profiles', { eq: { id: cid } }))[0] || {};
   const html = `${S.needsV5 ? V5_NOTICE : ''}
+    ${typeof reportTypeSelectHtml === 'function' ? await reportTypeSelectHtml(cid) : ''}
     <div class="card"><h3>Nuevo informe mensual</h3>
       <div class="chips">${pr.map((p, i) => `<button class="chip${p === sel ? ' on' : ''}" data-act="rpP" data-i="${i}">${p[0]}</button>`).join('')}</div>
       <div class="rex-grid"><label><span>Desde</span><input class="input" type="date" id="rp-s" value="${sel[1]}"></label><label><span>Hasta</span><input class="input" type="date" id="rp-e" value="${sel[2]}"></label></div>
@@ -394,7 +395,7 @@ async function coachInformesTab(cid) {
       <div class="row-btns"><a class="btn sm primary" href="#/informe/${r.id}">Ver / PDF</a>${waBtn(client.phone, `Hola ${firstName(client.full_name)}, tu informe mensual de progreso ya está disponible en la app de ${BRAND.name} (Perfil › Informes mensuales).`, 'Avisar')}<button class="btn sm danger-outline" data-act="rpDel" data-id="${r.id}">Eliminar</button></div></div>`).join('') : ''}`;
   const per = () => { const s = $('#rp-s').value, e = $('#rp-e').value; if (!s || !e || e < s) { toast('Revisa las fechas del periodo', 'error'); return null; } return [s, e]; };
   return {
-    html, click: {
+    html, change: t => typeof reportTypeChange === 'function' ? reportTypeChange(t, cid) : false, click: {
       rpP: el => { S.repPreset = +el.dataset.i; const p = pr[+el.dataset.i]; $('#rp-s').value = p[1]; $('#rp-e').value = p[2]; document.querySelectorAll('[data-act=rpP]').forEach(x => x.classList.toggle('on', x === el)); },
       rpPrev: () => { const p = per(); if (p) location.hash = `#/informe/${cid}/${p[0]}/${p[1]}`; },
       rpSave: async () => { const p = per(); if (!p) return; const [r] = await DB.insert('reports', { client_id: cid, period_start: p[0], period_end: p[1], comment: $('#rp-c').value.trim() || null, goals: $('#rp-g').value.trim() || null }); toast('Informe publicado'); location.hash = '#/informe/' + r.id; },
@@ -503,7 +504,8 @@ async function vRecordatorios() {
     <div class="card"><h3>Entrenamiento</h3>${row('train', 'Recordar 30 minutos antes de entrenar', p.train.time)}
       <div class="chips">${['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'].map(dn => `<button class="chip${p.train.days.includes(dn) ? ' on' : ''}" data-act="tday" data-v="${dn}">${dn.slice(0, 3)}</button>`).join('')}</div></div>
     <div class="card"><h3>Seguimiento</h3>${row('checkin', 'Check-in semanal', p.checkin.time, `<select class="input" data-rd>${['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'].map(dn => `<option${dn === p.checkin.day ? ' selected' : ''}>${dn}</option>`).join('')}</select>`)}
-      ${row('log', 'Registrar las comidas del día', p.log.time)}</div>
+      ${row('log', 'Registrar las comidas del día', p.log.time)}
+      ${S.needsV10 ? '' : `<label class="check"><input type="checkbox" data-smart ${p.smart !== false ? 'checked' : ''}> Solo avisar lo que falta: las notificaciones push se omiten si ya registraste esa comida, la meta de agua, el suplemento o el check-in</label>`}</div>
     <button class="btn primary block" data-act="ics">${isIOS ? 'Agregar al calendario del iPhone' : 'Descargar recordatorios (.ics)'}</button>
     ${isIOS ? '<button class="btn block" data-act="icsFile">Descargar archivo .ics</button>' : ''}
     <div class="card"><h3>Cómo agregarlos</h3>
@@ -515,6 +517,7 @@ async function vRecordatorios() {
       if (t.dataset.rt) { const k = t.dataset.rt; if (k.startsWith('meal:')) p.meals[k.slice(5)].time = t.value; else p[k].time = t.value; }
       if ('rw' in t.dataset) p.water.times = t.value;
       if ('rd' in t.dataset) p.checkin.day = t.value;
+      if ('smart' in t.dataset) p.smart = t.checked;
       saveRemPrefs(p);
     },
     click: {

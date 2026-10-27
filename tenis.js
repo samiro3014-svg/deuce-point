@@ -9,7 +9,7 @@
    Depende de app.js, nutri.js, auto.js y gestion.js.
    ===================================================================== */
 
-const TENIS_DEF = { match_carb_gkg: 7, pre_carb_gkg: 6, taper_days: 7, taper_pct: 60, sweat_na_mgl: 900, sweat_na_salty: 1500 };
+const TENIS_DEF = { load_carb_gkg: 8, match_carb_gkg: 7, pre_carb_gkg: 6, taper_days: 7, taper_pct: 60, sweat_na_mgl: 900, sweat_na_salty: 1500 };
 const cfgT = k => num(S.settings[k] ?? TENIS_DEF[k]);
 const SURFACES = ['Arcilla', 'Dura', 'Césped', 'Sintética'];
 async function latestWeight(cid) {
@@ -81,9 +81,10 @@ async function wellnessCardHtml() {
   if (S.needsV6) return '';
   try {
     const w = (await DB.select('wellness', { eq: { client_id: S.profile.id, log_date: todayStr() } }))[0];
-    if (w) { const l = wellnessLight(w); return `<div class="card well-done"><span class="light ${l.cls}"></span><div><b>Bienestar de hoy: ${l.tot}/25 · ${l.label}</b><small class="muted">${esc(l.text)}</small></div></div>`; }
+    if (w) { const l = wellnessLight(w); return `<div class="card well-done"><span class="light ${l.cls}"></span><div><b>Bienestar de hoy: ${l.tot}/25 · ${l.label}</b><small class="muted">${esc(l.text)}</small>${typeof hrvLineHtml === 'function' ? await hrvLineHtml(w) : ''}</div></div>`; }
     return `<div class="card well" id="well-card"><h3>Bienestar de hoy</h3><p class="small muted">Responde antes de entrenar (1 = muy mal, 5 = muy bien).</p>
       ${WELL_ITEMS.map(([k, l]) => `<div class="well-row"><span>${esc(l)}</span><div class="chips scale5">${[1, 2, 3, 4, 5].map(n => `<button class="chip" data-act="wPick" data-k="${k}" data-v="${n}" title="${WELL_LBL[n]}">${n}</button>`).join('')}</div></div>`).join('')}
+      ${S.needsV10 ? '' : `<details class="small"><summary>Horas de sueño, variabilidad cardiaca y pulso en reposo (opcional)</summary><div class="rex-grid three"><label><span>Horas de sueño</span><input class="input" id="wl-sh" inputmode="decimal" placeholder="7,5"></label><label><span>VFC (ms, rMSSD)</span><input class="input" id="wl-hrv" inputmode="numeric" placeholder="65"></label><label><span>Pulso en reposo</span><input class="input" id="wl-rhr" inputmode="numeric" placeholder="55"></label></div><p class="muted">Mídelos al despertar, con el mismo reloj o aplicación todos los días.</p></details>`}
       <button class="btn primary block" data-act="wSave">Guardar</button></div>`;
   } catch (e) { return ''; }
 }
@@ -93,7 +94,9 @@ const wellnessHandlers = (after) => {
     wPick: el => { v[el.dataset.k] = +el.dataset.v; el.parentElement.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c === el)); },
     wSave: async () => {
       const miss = WELL_ITEMS.find(([k]) => !v[k]); if (miss) return toast('Responde: ' + miss[1], 'error');
-      await DB.insert('wellness', Object.assign({ client_id: S.profile.id, log_date: todayStr() }, v));
+      const ex = {}; const gv = id => { const e = document.getElementById(id); return e && e.value.trim() ? num(e.value) : null; };
+      if (!S.needsV10) { const sh = gv('wl-sh'), hrv = gv('wl-hrv'), rhr = gv('wl-rhr'); if (sh) ex.sleep_h = Math.min(16, sh); if (hrv) ex.hrv_ms = Math.round(hrv); if (rhr) ex.rhr = Math.round(rhr); }
+      await DB.insert('wellness', Object.assign({ client_id: S.profile.id, log_date: todayStr() }, v, ex));
       const l = wellnessLight(v); toast('Bienestar registrado · ' + l.label); after();
     }
   };
@@ -106,9 +109,11 @@ async function tournamentsOf(cid) { if (S.needsV6) return []; try { return await
 /* Tipo de día por torneo: «match» (días del torneo) o «pre» (día anterior) */
 async function tournamentDay(cid, date, plan) {
   const ts = await tournamentsOf(cid);
-  const t = ts.find(x => date >= x.start_date && date <= (x.end_date || x.start_date)) || ts.find(x => addDays(x.start_date, -1) === date);
+  const t = ts.find(x => date >= x.start_date && date <= (x.end_date || x.start_date)) || ts.find(x => addDays(x.start_date, -1) === date) || ts.find(x => x.carb_load && addDays(x.start_date, -2) === date);
   if (!t) return null;
   const w = await latestWeight(cid); if (!w) return null;
+  // Carga de carbohidratos (v10): las 48 h previas usan la meta de carga
+  if (t.carb_load && date < t.start_date) { const gk = cfgT('load_carb_gkg') || 8; return { t, type: 'pre', label: 'Carga de carbohidratos', gkg: gk, carbs: Math.max(num(plan.carbs_g), Math.round(w * gk)) }; }
   const match = date >= t.start_date;
   const gkg = cfgT(match ? 'match_carb_gkg' : 'pre_carb_gkg');
   return { t, type: match ? 'match' : 'pre', label: match ? 'Día de torneo' : 'Víspera de torneo', gkg, carbs: Math.max(num(plan.carbs_g), Math.round(w * gkg)) };
@@ -339,7 +344,7 @@ async function rendimientoTab(cid, sub, base) {
   if (S.needsV6) return { html: nav + V6_NOTICE, click: {} };
   const R = { carga: rendCarga, partidos: rendPartidos, torneos: rendTorneos, hidratacion: rendHidratacion, pruebas: rendPruebas, molestias: rendMolestias, ciclo: typeof rendCiclo === 'function' ? rendCiclo : rendCarga }[sub];
   const r = await R(cid, info, coach);
-  return { html: nav + r.html, click: r.click || {}, change: r.change, after: r.after };
+  return { html: nav + (coach && sub === 'carga' && typeof vInformeClub === 'function' ? `<div class="row-btns"><a class="btn sm" href="#/informe-club/${cid}">Informe para el entrenador del club</a></div>` : '') + r.html, click: r.click || {}, change: r.change, after: r.after };
 }
 async function rendCarga(cid) {
   const L = await loadData(cid, 90); const wk = weeklyLoads(L, 8); const now = acwrAt(L, todayStr()); const z = acwrZone(now.ratio);
@@ -348,6 +353,8 @@ async function rendCarga(cid) {
   const html = `<div class="stats3"><div><b>${fmtInt(now.acute)}</b><small>Carga 7 días (UA)</small></div><div><b>${fmtInt(now.chronic)}</b><small>Promedio semanal 4 semanas</small></div><div><b class="${z.cls}">${now.ratio == null ? '—' : fmtN(now.ratio)}</b><small>Relación aguda:crónica</small></div></div>
     <div class="card"><div class="day-h"><h3>Estado de la carga</h3><span class="badge ${z.cls}">${esc(z.label.split(':')[0])}</span></div><p class="small">${esc(z.label)}.</p>
       <p class="small muted">Carga de cada sesión = esfuerzo percibido (RPE 0–10) × minutos. Relación aguda:crónica = carga de los últimos 7 días ÷ promedio semanal de las últimas 4 semanas. Zona óptima 0,8–1,3; por encima de 1,5 aumenta el riesgo de lesión (Gabbett, 2016). Es un indicador orientativo que se interpreta junto con el bienestar y las molestias.${L.unrated ? ` ${L.unrated} sesiones de fuerza sin RPE no se incluyen.` : ''}</p></div>
+    ${typeof monotonyHtml === 'function' ? monotonyHtml(L) : ''}
+    ${typeof hrvChartHtml === 'function' ? await hrvChartHtml(cid) : ''}
     <div class="card"><h3>Carga semanal (UA)</h3>${vbars(wk.map((w, i) => ({ label: fmtDM(parseDay(w.end)), value: w.load, text: w.load >= 1000 ? r1(w.load / 1000) + 'k' : Math.round(w.load), hi: i === wk.length - 1 })), 'Sin sesiones con RPE registradas.')}</div>
     <div class="card"><h3>Relación aguda:crónica por semana</h3>${vbars(wk.map((w, i) => ({ label: fmtDM(parseDay(w.end)), value: w.ratio || 0, text: w.ratio ? fmtN(w.ratio) : '', hi: i === wk.length - 1 })), 'Se requieren al menos 3 semanas de registros.')}<p class="small muted">Semana que termina en la fecha indicada.</p></div>
     <div class="card"><h3>Bienestar diario (puntaje sobre 25)</h3>${vbars(days14.map((d, i) => { const w = wells.find(x => x.log_date === d); const l = wellnessLight(w); return { label: fmtDM(parseDay(d)), value: l ? l.tot : 0, text: l ? l.tot : '', hi: i === 13 }; }), 'Sin registros de bienestar.')}
@@ -361,8 +368,10 @@ async function rendPartidos(cid) {
       <div class="rex-grid three"><label><span>Fecha</span><input class="input" type="date" id="tp-d" value="${todayStr()}"></label><label><span>Minutos</span><input class="input" id="tp-m" inputmode="numeric" placeholder="90"></label><label><span>Superficie</span><select class="input" id="tp-s">${SURFACES.map(s => `<option>${s}</option>`).join('')}</select></label></div>
       <div class="field"><span>Esfuerzo percibido (RPE 0–10)</span><div class="chips scale11">${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<button class="chip" data-act="tr" data-v="${n}">${n}</button>`).join('')}</div><small class="muted">0 reposo · 3 moderado · 5 duro · 7 muy duro · 10 máximo</small></div>
       <input class="input" id="tp-r" placeholder="Resultado o rival (opcional)">
+      ${S.needsV10 ? '' : `<div class="rex-grid"><label><span>Saques (opcional)</span><input class="input" id="tp-sv" inputmode="numeric" placeholder="0"></label><label><span>Golpes totales (opcional)</span><input class="input" id="tp-st" inputmode="numeric" placeholder="0"></label></div>`}
       <button class="btn primary block" data-act="tpSave">Guardar</button>
       <p class="small muted">La carga (RPE × minutos) se suma al control de carga, y el gasto estimado se suma a las calorías del día en Hoy.</p></div>
+    ${typeof servesHtml === 'function' ? servesHtml(ts) : ''}
     ${ts.length ? `<div class="card"><h3>Registros</h3><table class="tbl"><thead><tr><th>Fecha</th><th>Tipo</th><th>Min</th><th>RPE</th><th>Carga</th><th></th></tr></thead><tbody>${ts.map(t => `<tr><td>${fmtDM(parseDay(t.log_date))}${t.result ? `<br><small class="muted">${esc(t.result)}</small>` : ''}</td><td>${esc(t.kind)}<br><small class="muted">${esc(t.surface || '')}</small></td><td>${fmtInt(t.minutes)}</td><td>${fmtInt(t.rpe)}</td><td>${fmtInt(num(t.rpe) * num(t.minutes))}</td><td><button class="icon-btn danger" data-act="tpDel" data-id="${t.id}" aria-label="Eliminar">✕</button></td></tr>`).join('')}</tbody></table></div>` : ''}`;
   let kind = 'Práctica', rpe = null;
   return {
@@ -371,7 +380,8 @@ async function rendPartidos(cid) {
       tr: el => { rpe = +el.dataset.v; document.querySelectorAll('[data-act=tr]').forEach(x => x.classList.toggle('on', x === el)); },
       tpSave: async () => {
         const m = num($('#tp-m').value); if (!m) return toast('Indica los minutos', 'error'); if (rpe == null) return toast('Indica el esfuerzo percibido', 'error');
-        await DB.insert('tennis_sessions', { client_id: cid, log_date: $('#tp-d').value || todayStr(), kind, minutes: Math.round(m), surface: $('#tp-s').value, rpe, result: $('#tp-r').value.trim() || null });
+        const xs = !S.needsV10 ? { serves: Math.round(num(($('#tp-sv') || {}).value)) || null, strokes: Math.round(num(($('#tp-st') || {}).value)) || null } : {};
+        await DB.insert('tennis_sessions', Object.assign({ client_id: cid, log_date: $('#tp-d').value || todayStr(), kind, minutes: Math.round(m), surface: $('#tp-s').value, rpe, result: $('#tp-r').value.trim() || null }, xs));
         toast('Registro guardado'); route();
       },
       tpDel: async el => { if (!confirm('¿Eliminar este registro?')) return; await DB.remove('tennis_sessions', el.dataset.id); route(); }
@@ -408,6 +418,7 @@ async function rendTorneos(cid, info) {
       <input class="input" id="to-n" placeholder="Nombre del torneo">
       <div class="rex-grid"><label><span>Inicio</span><input class="input" type="date" id="to-s"></label><label><span>Fin</span><input class="input" type="date" id="to-e"></label></div>
       <div class="rex-grid three"><label><span>Superficie</span><select class="input" id="to-sf"><option></option>${SURFACES.map(s => `<option>${s}</option>`).join('')}</select></label><label><span>Ciudad</span><input class="input" id="to-c"></label><label><span>Categoría</span><input class="input" id="to-k" placeholder="16 años, Open…"></label></div>
+      ${S.needsV10 ? '' : `<label class="check"><input type="checkbox" id="to-cl"> Carga de carbohidratos las 48 h previas (${fmtN(cfgT('load_carb_gkg'))} g/kg${w ? ' · ' + fmtInt(w * cfgT('load_carb_gkg')) + ' g' : ''}). Indicada para competencias de más de 90 minutos continuos o varios partidos en el mismo día.</label>`}
       <button class="btn primary block" data-act="tAdd">Guardar torneo</button>
       <p class="small muted">Periodización automática: ${fmtInt(cfgT('taper_days'))} días antes del torneo el volumen de fuerza baja al ${fmtInt(cfgT('taper_pct'))} % de las series (40 % durante el torneo). La víspera, los carbohidratos suben a ${fmtN(cfgT('pre_carb_gkg'))} g/kg y en los días de torneo a ${fmtN(cfgT('match_carb_gkg'))} g/kg (${w ? fmtInt(w * cfgT('pre_carb_gkg')) + ' y ' + fmtInt(w * cfgT('match_carb_gkg')) + ' g' : 'según el peso'}), con las porciones ajustadas en Hoy.</p></div>
     ${next.length ? '<h2 class="sec">Próximos</h2>' + next.map(card).join('') : ''}${past.length ? '<h2 class="sec">Anteriores</h2>' + past.slice(0, 10).map(card).join('') : ''}`;
@@ -416,7 +427,7 @@ async function rendTorneos(cid, info) {
       tAdd: async () => {
         const n = $('#to-n').value.trim(), s = $('#to-s').value; if (!n || !s) return toast('Indica el nombre y la fecha de inicio', 'error');
         const e = $('#to-e').value || s; if (e < s) return toast('La fecha de fin debe ser posterior al inicio', 'error');
-        await DB.insert('tournaments', { client_id: cid, name: n, start_date: s, end_date: e, surface: $('#to-sf').value || null, city: $('#to-c').value.trim() || null, category: $('#to-k').value.trim() || null });
+        await DB.insert('tournaments', Object.assign({ client_id: cid, name: n, start_date: s, end_date: e, surface: $('#to-sf').value || null, city: $('#to-c').value.trim() || null, category: $('#to-k').value.trim() || null }, $('#to-cl') && $('#to-cl').checked ? { carb_load: true } : {}));
         toast('Torneo guardado'); route();
       },
       tDel: async el => { if (!confirm('¿Eliminar este torneo?')) return; await DB.remove('tournaments', el.dataset.id); route(); },

@@ -7,13 +7,16 @@
 async function readinessFor(cid) {
   if (S.needsV6 || typeof wellnessLight !== 'function') return null;
   const w = (await DB.select('wellness', { eq: { client_id: cid, log_date: todayStr() } }).catch(() => []))[0];
-  const l = w ? wellnessLight(w) : null; if (!l || l.cls === 'ok') return null;
-  return { cls: l.cls, tot: l.tot, label: l.label };
+  const l = w ? wellnessLight(w) : null;
+  const hv = w && typeof hrvStatus === 'function' ? await hrvStatus(cid, w).catch(() => null) : null;
+  if (hv && hv.low && (!l || l.cls === 'ok')) return { cls: 'warnb', tot: l ? l.tot : 0, label: 'VFC baja', hrv: hv };
+  if (!l || l.cls === 'ok') return null;
+  return { cls: l.cls, tot: l.tot, label: l.label, hrv: hv };
 }
 function readyBannerHtml(d) {
   const r = d.ready; if (!r) return '';
   if (d.adjusted) return `<div class="card ok-box small">Sesión ajustada por bienestar (${r.label.toLowerCase()}): una serie menos por ejercicio y RIR +1.</div>`;
-  return `<div class="card warn-box small"><b>Bienestar de hoy: ${r.tot}/25 · ${esc(r.label)}.</b> ${r.cls === 'bad' ? 'Se sugiere reducir el volumen y la intensidad.' : 'Se sugiere evitar el fallo muscular.'} Ajuste propuesto: una serie menos en cada ejercicio (mínimo 2) y RIR +1.
+  return `<div class="card warn-box small"><b>Bienestar de hoy: ${r.tot}/25 · ${esc(r.label)}.</b>${r.hrv && r.hrv.low ? ` VFC ${fmtInt(r.hrv.v)} ms, por debajo de tu rango habitual (${fmtInt(r.hrv.lo)}–${fmtInt(r.hrv.hi)} ms).` : ''} ${r.cls === 'bad' ? 'Se sugiere reducir el volumen y la intensidad.' : 'Se sugiere evitar el fallo muscular.'} Ajuste propuesto: una serie menos en cada ejercicio (mínimo 2) y RIR +1.
     <div class="row-btns"><button class="btn sm primary" data-act="rAdj">Aplicar ajuste</button><button class="btn sm" data-act="rNo">Mantener la sesión</button></div></div>`;
 }
 const readyHandlers = rerender => ({

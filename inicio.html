@@ -20,6 +20,7 @@
     .btn.primary { background: var(--accent); color: #fff; } .btn.ghost { background: transparent; color: #fff; border: 2px solid rgba(255,255,255,.6); }
     .btn.block { display: block; width: 100%; } .btn.dark { background: var(--brand); color: #fff; }
     .cta { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 18px; }
+    .promo { border-left: 4px solid var(--accent); background: #eef4e6; }
     h2 { font-size: 21px; margin: 30px 0 10px; color: var(--brand); }
     .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin: 10px 0; }
     .svc { border-left: 4px solid var(--accent); } .svc b { font-size: 17px; } .svc .price { float: right; font-weight: 700; color: var(--brand); } .svc p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
@@ -95,7 +96,23 @@
     async function load() {
       try {
         if (sb) { const { data } = await sb.rpc('public_info'); if (data) info = Object.assign(info, data); }
-        else { const d = demoDb(); const s = d && d.app_settings && d.app_settings[0] && d.app_settings[0].data || {}; info = Object.assign(info, { whatsapp: s.whatsapp || '', intro: s.landing_intro || '', services: s.landing_services || '', title: s.landing_title || '' }); }
+        else { const d = demoDb(); const s = d && d.app_settings && d.app_settings[0] && d.app_settings[0].data || {}; info = Object.assign(info, { whatsapp: s.whatsapp || '', intro: s.landing_intro || '', services: s.landing_services || '', title: s.landing_title || '', brand: s.brand || null, promo: s.season_promo || '' }); }
+      } catch (e) { }
+      // Marca guardada en la app (v10)
+      const b = info.brand || {};
+      if (b.name) { BR.name = b.name; document.title = b.name + ' · ' + (b.tagline || BR.tagline || 'Nutrición y entrenamiento'); $('#ft').textContent = b.name + ' · ' + (b.tagline || ''); }
+      if (b.primary) document.documentElement.style.setProperty('--brand', b.primary);
+      if (b.accent) document.documentElement.style.setProperty('--accent', b.accent);
+      if (b.logo) document.querySelectorAll('img.logo-img, header img').forEach(im => { im.src = b.logo; });
+      // Promoción de temporada vigente
+      const [pn, pp, pf, pt] = String(info.promo || '').split('|').map(x => (x || '').trim()); const today = new Date().toISOString().slice(0, 10);
+      if (pn && num(pp) && (!pf || today >= pf) && (!pt || today <= pt)) { const el = document.createElement('div'); el.className = 'card promo'; el.innerHTML = `<b>${esc(pn)}</b><p>${fmt(num(pp))} % de descuento${pt ? ' hasta el ' + esc(new Date(pt + 'T12:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'long' })) : ''}.</p>`; $('#svc-sec').before(el); }
+      // Testimonios publicados con autorización
+      try {
+        let ts = [];
+        if (sb) { const { data } = await sb.rpc('public_testimonials'); ts = data || []; }
+        else { const d = demoDb(); ts = ((d && d.surveys) || []).filter(x => x.consent && x.published && x.testimonial).map(x => ({ texto: x.testimonial, nombre: x.show_name ? 'Asesorado' : 'Asesorado', fecha: String(x.created_at).slice(0, 10) })); }
+        if (ts.length) { const sec = document.createElement('section'); sec.id = 'testimonios'; sec.innerHTML = `<h2>Resultados de nuestros asesorados</h2>${ts.slice(0, 8).map(t => `<div class="card"><p>«${esc(t.texto)}»</p><p class="muted">${esc(t.nombre || 'Asesorado')}</p></div>`).join('')}`; $('#form').before(sec); }
       } catch (e) { }
       if (info.title) $('#h-title').textContent = info.title;
       if (info.intro) $('#h-intro').textContent = info.intro;

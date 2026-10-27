@@ -99,9 +99,10 @@ function vEncuesta() {
 async function vNegocio(sub) {
   if (S.profile.role !== 'coach') return paint('<div class="card"><p>Sección disponible solo para el entrenador.</p></div>');
   if (S.needsV6) return paint(V6_NOTICE, {}, 'Negocio');
-  sub = ['resumen', 'prospectos', 'pagos', 'referidos', 'encuestas', 'captacion'].includes(sub) ? sub : 'resumen';
-  const nav = `<div class="chips scroll">${[['resumen', 'Resumen'], ['prospectos', 'Prospectos'], ['pagos', 'Pagos'], ['referidos', 'Referidos'], ['encuestas', 'Encuestas'], ['captacion', 'Página y QR']].map(([k, l]) => `<a class="chip${k === sub ? ' on' : ''}" href="#/negocio/${k}">${l}</a>`).join('')}</div>`;
-  const r = await ({ resumen: bizResumen, prospectos: bizLeads, pagos: bizPagos, referidos: bizReferidos, encuestas: bizEncuestas, captacion: bizCaptacion })[sub]();
+  sub = ['resumen', 'prospectos', 'pagos', 'referidos', 'afiliados', 'encuestas', 'captacion'].includes(sub) ? sub : 'resumen';
+  if (sub === 'afiliados' && typeof bizAfiliados !== 'function') sub = 'resumen';
+  const nav = `<div class="chips scroll">${[['resumen', 'Resumen'], ['prospectos', 'Prospectos'], ['pagos', 'Pagos'], ['referidos', 'Referidos'], ...(typeof bizAfiliados === 'function' && !S.needsV10 ? [['afiliados', 'Afiliados']] : []), ['encuestas', 'Encuestas'], ['captacion', 'Página y QR']].map(([k, l]) => `<a class="chip${k === sub ? ' on' : ''}" href="#/negocio/${k}">${l}</a>`).join('')}</div>`;
+  const r = await ({ resumen: bizResumen, prospectos: bizLeads, pagos: bizPagos, referidos: bizReferidos, afiliados: typeof bizAfiliados === 'function' ? bizAfiliados : bizResumen, encuestas: bizEncuestas, captacion: bizCaptacion })[sub]();
   paint(nav + r.html, { click: r.click || {}, change: r.change }, 'Negocio');
   if (r.after) r.after();
 }
@@ -158,11 +159,17 @@ async function bizPagos() {
   const byId = Object.fromEntries(clients.map(c => [c.id, c]));
   const html = `<div class="card"><h3>Registrar pago</h3><label class="field"><span>Asesorado</span><select class="input" id="py-c">${clients.map(c => `<option value="${c.id}">${esc(c.full_name || c.email)}</option>`).join('')}</select></label>
       <div class="rex-grid three"><label><span>Fecha</span><input class="input" type="date" id="py-d" value="${todayStr()}"></label><label><span>Valor</span><input class="input" id="py-v" inputmode="numeric"></label><label><span>Medio</span><select class="input" id="py-m"><option>Transferencia</option><option>Wompi</option><option>Mercado Pago</option><option>Efectivo</option><option>Otro</option></select></label></div>
-      <input class="input" id="py-k" placeholder="Concepto (Mensual, Trimestral…)"><button class="btn primary block" data-act="pyAdd">Registrar</button></div>
-    ${pays.length ? `<div class="card"><h3>Pagos</h3><table class="tbl"><thead><tr><th>Fecha</th><th>Asesorado</th><th class="n">Valor</th><th></th></tr></thead><tbody>${pays.map(p => `<tr><td>${fmtDM(parseDay(p.pay_date))}</td><td>${esc((byId[p.client_id] || {}).full_name || '—')}<br><small class="muted">${esc([p.concept, p.method].filter(Boolean).join(' · '))}</small></td><td class="n">${fmtMoney(p.amount)}</td><td><button class="icon-btn danger" data-act="pyDel" data-id="${p.id}" aria-label="Eliminar">✕</button></td></tr>`).join('')}</tbody></table></div>` : ''}`;
+      <input class="input" id="py-k" placeholder="Concepto (Mensual, Trimestral…)">${S.needsV10 ? '' : '<input class="input" id="py-cp" placeholder="Cupón (opcional)" style="text-transform:uppercase">'}<button class="btn primary block" data-act="pyAdd">Registrar</button></div>
+    ${!S.needsV10 && typeof coupons === 'function' && coupons().length ? `<div class="card"><h3>Cupones</h3>${coupons().map(c => { const u = pays.filter(p => p.coupon === c.code).length; const st = couponCheck(c.code, u); return `<p class="small"><b>${esc(c.code)}</b> · ${fmtInt(c.pct)} %${c.until ? ' · vence ' + esc(fmtDM(parseDay(c.until))) : ''} · ${u}${c.max ? '/' + c.max : ''} usos <span class="badge ${st.ok ? 'ok' : ''}">${st.ok ? 'Vigente' : esc(st.msg)}</span></p>`; }).join('')}</div>` : ''}
+    ${pays.length ? `<div class="card"><h3>Pagos</h3><table class="tbl"><thead><tr><th>Fecha</th><th>Asesorado</th><th class="n">Valor</th><th></th></tr></thead><tbody>${pays.map(p => `<tr><td>${fmtDM(parseDay(p.pay_date))}</td><td>${esc((byId[p.client_id] || {}).full_name || '—')}<br><small class="muted">${esc([p.concept, p.method].filter(Boolean).join(' · '))}</small></td><td class="n">${fmtMoney(p.amount)}${p.coupon ? `<br><small class="muted">${esc(p.coupon)}</small>` : ''}</td><td>${typeof receiptModal === 'function' && !S.needsV10 ? `<button class="icon-btn" data-act="pyRec" data-id="${p.id}" aria-label="Recibo">🧾</button>` : ''}<button class="icon-btn danger" data-act="pyDel" data-id="${p.id}" aria-label="Eliminar">✕</button></td></tr>`).join('')}</tbody></table></div>` : ''}`;
   return {
     html, click: {
-      pyAdd: async () => { const v = num($('#py-v').value); if (!v) return toast('Indica el valor', 'error'); await DB.insert('payments', { client_id: $('#py-c').value, pay_date: $('#py-d').value || todayStr(), amount: v, method: $('#py-m').value, concept: $('#py-k').value.trim() || null }); toast('Pago registrado'); route(); },
+      pyAdd: async () => {
+        const v = num($('#py-v').value); if (!v) return toast('Indica el valor', 'error');
+        const cp = $('#py-cp') ? $('#py-cp').value.trim().toUpperCase() : ''; if (cp) { const st = couponCheck(cp, pays.filter(p => p.coupon === cp).length); if (!st.ok) return toast(st.msg, 'error'); }
+        await DB.insert('payments', Object.assign({ client_id: $('#py-c').value, pay_date: $('#py-d').value || todayStr(), amount: v, method: $('#py-m').value, concept: $('#py-k').value.trim() || null }, cp ? { coupon: cp } : {})); toast('Pago registrado'); route();
+      },
+      pyRec: el => receiptModal(el.dataset.id),
       pyDel: async el => { if (!confirm('¿Eliminar este pago?')) return; await DB.remove('payments', el.dataset.id); route(); }
     }
   };
@@ -183,7 +190,9 @@ async function bizEncuestas() {
   const avg = k => { const v = sv.map(s => num((s.items || {})[k])).filter(Boolean); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; };
   const tst = sv.filter(s => s.consent && s.testimonial);
   return {
+    change: async t => { if (t.dataset.pub) { await DB.update('surveys', t.dataset.pub, { published: t.checked }); toast(t.checked ? 'Publicado en la página' : 'Retirado de la página'); return true; } },
     html: `<div class="stats3"><div><b>${nps == null ? '—' : nps}</b><small>NPS (−100 a 100)</small></div><div><b>${n}</b><small>Respuestas</small></div><div><b>${tst.length}</b><small>Testimonios autorizados</small></div></div>
+      ${!S.needsV10 && typeof npsMonthlyHtml === 'function' ? await npsMonthlyHtml() + await testimonialsAdminHtml() : ''}
       <div class="card"><h3>Satisfacción promedio (1–5)</h3>${hbars(SURVEY_ITEMS.map(([k, l]) => ({ label: l, value: avg(k), text: avg(k) ? fmtN(avg(k)) : '—' })), 'Sin respuestas.')}<p class="small muted">NPS = % de promotores (9–10) − % de detractores (0–6). La encuesta aparece a cada asesorado a los 60 días y luego cada 3 meses.</p></div>
       ${tst.length ? '<h2 class="sec">Testimonios autorizados</h2>' + tst.map(s => `<div class="card"><p class="pre">«${esc(s.testimonial)}»</p><small class="muted">${s.show_name ? esc((byId[s.client_id] || {}).full_name || '') : 'Asesorado anónimo'} · ${esc(fmtDayMonth(dateStr(new Date(s.created_at))))} · recomendación ${s.nps}/10</small><button class="btn sm" data-act="cpT" data-v="${esc(`«${s.testimonial}» — ${s.show_name ? (byId[s.client_id] || {}).full_name || '' : 'Asesorado de ' + BRAND.name}`)}">Copiar</button></div>`).join('') : ''}
       ${sv.filter(s => s.comment).length ? '<h2 class="sec">Sugerencias</h2>' + sv.filter(s => s.comment).map(s => `<div class="card"><p class="pre">${esc(s.comment)}</p><small class="muted">${esc((byId[s.client_id] || {}).full_name || '')} · ${s.nps}/10</small></div>`).join('') : ''}`,

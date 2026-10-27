@@ -16,7 +16,7 @@ async function unreadCount(cid) {
 }
 function threadHtml(msgs) {
   let last = '';
-  return msgs.map(m => { const d = dateStr(new Date(m.created_at)); const sep = d !== last ? `<div class="msg-day">${esc(fmtDayLong(d))}</div>` : ''; last = d; return `${sep}<div class="msg ${m.sender_id === S.profile.id ? 'me' : 'them'}"><p class="pre">${esc(m.body)}</p><small>${fmtTime(m.created_at)}${m.sender_id === S.profile.id && m.read_at ? ' · leído' : ''}</small></div>`; }).join('') || '<p class="small muted center">Sin mensajes todavía.</p>';
+  return msgs.map(m => { const d = dateStr(new Date(m.created_at)); const sep = d !== last ? `<div class="msg-day">${esc(fmtDayLong(d))}</div>` : ''; last = d; return `${sep}<div class="msg ${m.sender_id === S.profile.id ? 'me' : 'them'}">${m.media_path ? `<div class="msg-media" data-mp="${esc(m.media_path)}" data-mt="${esc(m.media_type || 'foto')}"><small class="muted">Cargando ${m.media_type === 'audio' ? 'audio' : 'foto'}…</small></div>` : ''}${m.media_path && /^\[(Foto|Audio)\]$/.test(m.body) ? '' : `<p class="pre">${esc(m.body)}</p>`}<small>${fmtTime(m.created_at)}${m.sender_id === S.profile.id && m.read_at ? ' · leído' : ''}</small></div>`; }).join('') || '<p class="small muted center">Sin mensajes todavía.</p>';
 }
 async function markRead(cid, msgs) {
   const now = new Date().toISOString();
@@ -32,11 +32,12 @@ async function chatTab(cid) {
   const html = `<div class="chat" id="chat">${threadHtml(msgs)}</div>
     ${quick.length ? `<div class="chips scroll">${quick.map((q, i) => `<button class="chip" data-act="qr" data-i="${i}">${esc(q.length > 38 ? q.slice(0, 36) + '…' : q)}</button>`).join('')}</div>` : ''}
     <div class="chat-in"><textarea class="input" id="msg-t" rows="2" placeholder="Escribe un mensaje"></textarea><button class="btn primary" data-act="send">Enviar</button></div>
+    ${!S.needsV10 && typeof chatMediaBtnsHtml === 'function' ? chatMediaBtnsHtml() : ''}
     ${staff ? '<p class="small muted">Respuestas guardadas: se configuran en Ajustes.</p>' : '<p class="small muted">Tu entrenador responde en su horario de atención.</p>'}`;
   let n = msgs.length;
   const refresh = async () => {
     const ms = await DB.select('messages', { eq: { client_id: cid }, order: 'created_at' }); const box = $('#chat'); if (!box) return;
-    if (ms.length !== n || ms.some(m => m.read_at && !box.innerHTML.includes('leído'))) { n = ms.length; box.innerHTML = threadHtml(ms); box.scrollTop = box.scrollHeight; await markRead(cid, ms); }
+    if (ms.length !== n || ms.some(m => m.read_at && !box.innerHTML.includes('leído'))) { n = ms.length; box.innerHTML = threadHtml(ms); box.scrollTop = box.scrollHeight; await markRead(cid, ms); if (typeof loadChatMedia === 'function') loadChatMedia(box); }
   };
   return {
     html, click: {
@@ -44,9 +45,10 @@ async function chatTab(cid) {
       send: async el => {
         const t = $('#msg-t'); const body = t.value.trim(); if (!body) return;
         el.disabled = true; await DB.insert('messages', { client_id: cid, sender_id: S.profile.id, body }); t.value = ''; el.disabled = false; await refresh();
-      }
+      },
+      ...(typeof chatMediaHandlers === 'function' ? chatMediaHandlers(cid, () => refresh()) : {})
     },
-    after: () => { const box = $('#chat'); if (box) box.scrollTop = box.scrollHeight; clearInterval(S.tick); S.tick = setInterval(() => refresh().catch(() => { }), 8000); }
+    after: () => { const box = $('#chat'); if (box) { box.scrollTop = box.scrollHeight; if (typeof loadChatMedia === 'function') loadChatMedia(box); } clearInterval(S.tick); S.tick = setInterval(() => refresh().catch(() => { }), 8000); }
   };
 }
 async function vMensajes() { const r = await chatTab(S.profile.id); paint(r.html, { click: r.click }, 'Mensajes'); if (r.after) r.after(); }
@@ -234,12 +236,15 @@ async function vRetos() {
     <div class="rex-grid"><label><span>Métrica</span><select class="input" id="ch-m">${Object.entries(CH_METRICS).map(([k, [l, d]]) => `<option value="${k}">${l} (${d})</option>`).join('')}</select></label><label><span>Meta (opcional)</span><input class="input" id="ch-g" inputmode="numeric"></label></div>
     <div class="rex-grid"><label><span>Inicio</span><input class="input" type="date" id="ch-s" value="${todayStr()}"></label><label><span>Fin</span><input class="input" type="date" id="ch-e" value="${addDays(todayStr(), 29)}"></label></div>
     <label class="check"><input type="checkbox" id="ch-r" checked> Mostrar tabla de posiciones a los participantes (nombre y apellido abreviado)</label>
+    ${S.needsV10 ? '' : '<div class="rex-grid"><label><span>Inscripción $ (opcional)</span><input class="input" id="ch-p" inputmode="numeric" placeholder="0 = gratis"></label><label><span>Enlace de pago</span><input class="input" id="ch-l" type="url" placeholder="https://…"></label></div>'}
     <button class="btn primary block" data-act="chNew">Crear reto</button></div>` : '';
   for (const c of cs) {
     const rk = staff || joined.has(c.id) ? await challengeRanking(c).catch(() => []) : [];
     const show = staff || c.ranking;
     h += `<div class="card"><div class="day-h"><div><b>${esc(c.title)}</b><small class="muted">${esc(CH_METRICS[c.metric][0])} · ${esc(fmtDayMonth(c.start_date))} al ${esc(fmtDayMonth(c.end_date))} · ${rk.length} participantes</small></div>${c.end_date < todayStr() ? '<span class="badge">Finalizado</span>' : '<span class="badge ok">Activo</span>'}</div>
+      ${num(c.price) ? `<p class="small">Inscripción: <b>$${fmtInt(c.price)}</b>${!staff && c.pay_link ? ` · <a href="${esc(c.pay_link)}" target="_blank" rel="noopener">Pagar inscripción</a>` : ''}${!staff && joined.has(c.id) ? ((mem.find(m => m.challenge_id === c.id) || {}).paid ? ' · <span class="badge ok">Pago confirmado</span>' : ' · <span class="badge warnb">Pago pendiente de confirmar</span>') : ''}</p>` : ''}
       ${!staff && !joined.has(c.id) && c.end_date >= todayStr() ? `<button class="btn sm primary" data-act="chJoin" data-id="${c.id}">Unirme</button>` : ''}
+      ${staff && num(c.price) ? await challengePaidHtml(c) : ''}
       ${rk.length ? (show ? hbars(rk.slice(0, 15).map((r, i) => ({ label: `${i + 1}. ${r.name}${r.me ? ' (tú)' : ''}`, value: r.score, text: fmtScore(c, r.score) }))) : `<p class="small">Tu resultado: <b>${fmtScore(c, (rk.find(r => r.me) || { score: 0 }).score)}</b> ${CH_METRICS[c.metric][1]}.</p>`) : ''}
       ${c.goal ? `<p class="small muted">Meta: ${fmtScore(c, c.goal)} ${CH_METRICS[c.metric][1]}.</p>` : ''}
       ${staff ? `<button class="btn sm danger-outline" data-act="chDel" data-id="${c.id}">Eliminar</button>` : ''}</div>`;
@@ -249,13 +254,20 @@ async function vRetos() {
     click: {
       ...challengeHandlers(route),
       chNew: async () => {
-        const rec = { title: $('#ch-t').value.trim(), metric: $('#ch-m').value, goal: num($('#ch-g').value) || null, start_date: $('#ch-s').value, end_date: $('#ch-e').value, ranking: $('#ch-r').checked };
+        const rec = Object.assign({ title: $('#ch-t').value.trim(), metric: $('#ch-m').value, goal: num($('#ch-g').value) || null, start_date: $('#ch-s').value, end_date: $('#ch-e').value, ranking: $('#ch-r').checked }, $('#ch-p') && num($('#ch-p').value) ? { price: num($('#ch-p').value), pay_link: $('#ch-l').value.trim() || null } : {});
         if (!rec.title || !rec.start_date || !rec.end_date || rec.end_date < rec.start_date) return toast('Revisa el título y las fechas', 'error');
         await DB.insert('challenges', rec); toast('Reto creado: aparece en Hoy de los asesorados'); route();
       },
       chDel: async el => { if (!confirm('¿Eliminar el reto?')) return; await DB.remove('challenges', el.dataset.id); route(); }
-    }
+    },
+    change: async t => { if (t.dataset.paid) { await DB.update('challenge_members', t.dataset.paid, { paid: t.checked }); toast(t.checked ? 'Pago confirmado' : 'Pago desmarcado'); } }
   }, 'Retos');
+}
+
+async function challengePaidHtml(c) {
+  const ms = await DB.select('challenge_members', { eq: { challenge_id: c.id } }); if (!ms.length) return '';
+  const ps = await DB.select('profiles', { inn: { id: ms.map(m => m.client_id) } });
+  return `<details class="small"><summary>Pagos de inscripción: ${ms.filter(m => m.paid).length} de ${ms.length}</summary>${ms.map(m => `<label class="check"><input type="checkbox" data-paid="${m.id}" ${m.paid ? 'checked' : ''}> ${esc((ps.find(p => p.id === m.client_id) || {}).full_name || '')}</label>`).join('')}<p class="muted">Total recaudado: $${fmtInt(ms.filter(m => m.paid).length * num(c.price))}</p></details>`;
 }
 
 /* =====================================================================

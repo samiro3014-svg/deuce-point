@@ -189,7 +189,7 @@ async function copyPlan(planId, o) {
     for (const m of src.meals) {
       const [nm] = await DB.insert('plan_meals', { plan_id: np.id, name: m.name, time_label: m.time_label, instructions: m.instructions, position: m.position });
       for (const op of m.options) {
-        const [no] = await DB.insert('plan_options', Object.assign({ meal_id: nm.id, name: op.name, position: op.position }, op.recipe ? { recipe: op.recipe } : {}, !S.needsV7 && (op.weekdays || []).length ? { weekdays: op.weekdays } : {}));
+        const [no] = await DB.insert('plan_options', Object.assign({ meal_id: nm.id, name: op.name, position: op.position }, op.recipe ? { recipe: op.recipe } : {}, op.video_url ? { video_url: op.video_url } : {}, !S.needsV7 && (op.weekdays || []).length ? { weekdays: op.weekdays } : {}));
         await DB.insert('plan_items', op.items.map(i => ({ option_id: no.id, food_id: i.food_id, grams: Math.max(1, roundG(num(i.grams) * f)), position: i.position, note: i.note })));
       }
     }
@@ -222,7 +222,7 @@ const macroBars = (m, t) => macroBar('Calorías', m.kcal, t && t.kcal, 'kcal', '
 function foodListHtml(q, cat, act = 'pick') {
   const ql = norm(q);
   const list = S.foods.filter(f => (!cat || f.category === cat) && (!ql || norm(f.name + ' ' + f.category).includes(ql))).slice(0, 200);
-  return list.map(f => `<button class="pick-item" data-act="${act}" data-id="${f.id}"><b>${esc(f.name)}</b><small>${esc(f.category)} · 100 g: ${fmtInt(f.kcal)} kcal · P ${fmtN(f.protein)} · C ${fmtN(f.carbs)} · G ${fmtN(f.fat)}</small></button>`).join('') || '<p class="muted small">Sin resultados.</p>';
+  return list.map(f => `<button class="pick-item" data-act="${act}" data-id="${f.id}"><b>${esc(f.name)}${typeof exclTag === 'function' ? exclTag(f) : ''}</b><small>${esc(f.category)} · 100 g: ${fmtInt(f.kcal)} kcal · P ${fmtN(f.protein)} · C ${fmtN(f.carbs)} · G ${fmtN(f.fat)}</small></button>`).join('') || '<p class="muted small">Sin resultados.</p>';
 }
 function pickFood(title, onPick) {
   let q = '', cat = '';
@@ -292,7 +292,7 @@ function addFoodModal(o) {
 
 function replaceModal(o) {
   const { it, meal, log } = o; const f = foodOf(it.food_id);
-  const eqs = equivalents(f, num(it.grams), 0);
+  const eqs = equivalents(f, num(it.grams), 0).sort((a, b) => (typeof isExcl === 'function' ? isExcl(a.food) - isExcl(b.food) : 0));
   const key = CAT_KEY[f.category] || 'kcal';
   const g0 = log && log.food_id === f.id ? num(log.grams) : num(it.grams);
   modal(`${modalHead('Ajustar o reemplazar')}
@@ -302,7 +302,8 @@ function replaceModal(o) {
       <button class="btn primary block" data-act="own">Registrar ${esc(f.name)}</button></div>
     <h4>Equivalentes · ${esc(f.category)}</h4>
     <p class="small muted">Cantidades calculadas para aportar la misma ${KEY_LBL[key]} que la porción del plan.</p>
-    <div class="pick-list">${eqs.map((e, i) => `<button class="pick-item" data-act="eq" data-i="${i}"><b>${esc(e.food.name)} · ${fmtN(e.grams)} g</b><small>${esc(unitText(e.food, e.grams))}${unitText(e.food, e.grams) ? ' · ' : ''}${macroLine(e.m)}</small></button>`).join('') || '<p class="muted small">Sin equivalentes registrados en este grupo.</p>'}</div>
+    ${typeof eqCostNote === 'function' ? eqCostNote(f, num(it.grams), eqs) : ''}
+    <div class="pick-list">${eqs.map((e, i) => `<button class="pick-item" data-act="eq" data-i="${i}"><b>${esc(e.food.name)} · ${fmtN(e.grams)} g${typeof exclTag === 'function' ? exclTag(e.food) : ''}${typeof eqCostTag === 'function' ? eqCostTag(e) : ''}</b><small>${esc(unitText(e.food, e.grams))}${unitText(e.food, e.grams) ? ' · ' : ''}${macroLine(e.m)}</small></button>`).join('') || '<p class="muted small">Sin equivalentes registrados en este grupo.</p>'}</div>
     <button class="btn block" data-act="other">Buscar otro alimento</button>
     ${log ? '<button class="btn danger-outline block" data-act="clear">Quitar registro</button>' : ''}`, {
     input: t => { if (t.id === 'rp-g') $('#rp-m').textContent = macroLine(macrosFor(f, num(t.value))); },
@@ -379,12 +380,14 @@ async function vHoy(date, cid) {
   if ((tday && dayType === tday.type) || multi) tk.kcal = 0;   // en días de torneo la meta en g/kg ya cubre el partido; con tipos de día, el tipo ya incluye el gasto de la sesión
   if (tk.kcal) t = Object.assign({}, t, { kcal: t.kcal + tk.kcal, carbs: t.carbs + Math.round(tk.kcal * 0.7 / 4), fat: t.fat + Math.round(tk.kcal * 0.3 / 9) });
   const peri = dayType === 'train' && plan && plan.peri_meals ? plan.peri_meals : null;
-  const water = num(daily && daily.water_ml), waterT = num(plan && plan.water_ml) || 2500;
+  const water = num(daily && daily.water_ml), waterT = (num(plan && plan.water_ml) || 2500) + num(choices.__wx);
   const left = hasT ? t.kcal - tot.kcal : 0;
   const rerender = () => keepScroll(() => vHoy(date, cid));
 
   let html = '';
   const nut = !own || typeof showsNutrition !== 'function' || showsNutrition();
+  const hctx = { cid, date, own, isToday, full, plan, daily, choices, logs, tot, t: hasT ? t : null, water, waterT, nut, rerender: () => keepScroll(() => vHoy(date, cid)) };
+  const hk = async pos => { let h = ''; for (const x of HOOKS.hoy.filter(y => y.pos === pos)) h += await x.html(hctx).catch(e => { console.warn(e); return ''; }); return h; };
   if (own && isToday) html += `<p class="muted hello">Hola, ${esc(firstName(S.profile.full_name))}</p>`;
   html += `<div class="datebar"><a class="icon-btn" href="${base}${addDays(date, -1)}" aria-label="Día anterior">‹</a><b>${isToday ? 'Hoy · ' + esc(fmtDayLong(date).toLowerCase()) : esc(fmtDayLong(date))}</b><a class="icon-btn" href="${base}${addDays(date, 1)}" aria-label="Día siguiente">›</a></div>`;
   if (dayType) html += `<div class="seg daytype">${dayOpts.map(([k, l]) => `<button class="${dayType === k ? 'on' : ''}" data-act="dayT" data-v="${k}">${l}</button>`).join('')}</div>
@@ -421,6 +424,7 @@ async function vHoy(date, cid) {
     <div><b>${hasT ? fmtInt(t.kcal) : '—'}</b><small>Objetivo</small></div></div>
     ${macroBars(tot, hasT ? t : null)}
   </div>`;
+  html += await hk('afterSum');
   if (nut && cmp) html += `<p class="small muted">Compensación del evento «${esc(cmp.l || '')}» del ${esc(fmtDM(parseDay(cmp.from)))}: −${fmtInt(cmp.k)} kcal en cereales, tubérculos y frutas; las porciones ya están ajustadas.</p>`;
   if (own && isToday && nut && plan) {
     const tk3 = 'dp_tour_' + full.id;
@@ -431,6 +435,7 @@ async function vHoy(date, cid) {
     <div class="mb-t"><div class="mb-f w" style="width:${Math.min(100, water / waterT * 100).toFixed(1)}%"></div></div>
     <div class="row-btns"><button class="btn sm" data-act="water" data-d="-250">− 250 ml</button><button class="btn sm primary" data-act="water" data-d="250">+ 250 ml</button><button class="btn sm" data-act="water" data-d="500">+ 500 ml</button>${own ? (num(lsGet('dp_bottle', 0)) ? `<button class="btn sm" data-act="water" data-d="${num(lsGet('dp_bottle', 0))}">+ Botella ${fmtInt(num(lsGet('dp_bottle', 0)))} ml</button>` : '') + '<button class="linkbtn small" data-act="bottle">Mi botella</button>' : ''}</div>
     ${S.needsV6 || !mo('pasos') ? '' : `<label class="steps-in"><span>Pasos del día</span><input class="input" data-steps inputmode="numeric" value="${num(daily && daily.steps) || ''}" placeholder="0"></label>`}</div>`;
+  html += await hk('afterWater');
   if (own && typeof habitsCardHtml === 'function') html += await habitsCardHtml(date, daily).catch(() => '');
   if (own && isToday && typeof goalsCardHtml === 'function') html += await goalsCardHtml().catch(() => '');
   if (own && isToday && typeof weeklyCardHtml === 'function') html += await weeklyCardHtml(cid, full).catch(() => '');
@@ -451,7 +456,7 @@ async function vHoy(date, cid) {
   const used = new Set(); const itemMap = {};
   const yLogs = own ? await DB.select('food_logs', { eq: { client_id: cid, log_date: addDays(date, -1) } }).catch(() => []) : [];
   const repMap = choices.__rep || {}, pfMap = choices.__pf || {}, fbMap = choices.__fb || {};
-  const hand = typeof handOn === 'function' && handOn();
+  const hand = lsGet('dp_hand', '0') === '2' && !S.needsV10 ? 'casera' : typeof handOn === 'function' && handOn();
   const mctx = [];
   const itemRow = (it0, meal, log, pfm = 1) => {
     const f = foodOf(it0.food_id); if (!f) return '';
@@ -461,7 +466,7 @@ async function vHoy(date, cid) {
     const replaced = log && log.food_id !== it.food_id;
     const g = log ? num(log.grams) : num(it.grams);
     const kc = log ? num(log.kcal) : macrosFor(f, it.grams).kcal;
-    const ut = hand ? handText(replaced ? foodOf(log.food_id) : f, g) : replaced ? unitText(foodOf(log.food_id), g) : unitText(f, g);
+    const ut = hand === 'casera' && typeof caseraText === 'function' ? caseraText(replaced ? foodOf(log.food_id) : f, g) : hand ? handText(replaced ? foodOf(log.food_id) : f, g) : replaced ? unitText(foodOf(log.food_id), g) : unitText(f, g);
     return `<div class="fi${log ? ' done' : ''}">
       <button class="chk" data-act="tick" data-item="${it.id}" aria-label="Marcar ${esc(f.name)}">✓</button>
       <button class="fi-b" data-act="repl" data-item="${it.id}"><b>${esc(replaced ? log.name : f.name)}</b>
@@ -471,7 +476,7 @@ async function vHoy(date, cid) {
   };
   const logRow = l => `<div class="fi done extra"><span class="chk">✓</span><div class="fi-b"><b>${esc(l.name)}</b><small>${l.grams ? fmtN(l.grams) + ' g · ' : ''}${macroLine(logM(l))}</small></div><button class="icon-btn danger" data-act="dellog" data-id="${l.id}" aria-label="Eliminar">✕</button></div>`;
   const mealByKey = {};
-  if (nut) html += (own && plan ? `<div class="meals-h"><h2 class="sec">Comidas</h2><div class="seg sm"><button class="${hand ? '' : 'on'}" data-act="handT" data-v="0">Gramos</button><button class="${hand ? 'on' : ''}" data-act="handT" data-v="1">Mano</button></div></div>` : '') + meals.map((m, mi) => {
+  if (nut) html += (own && plan ? `<div class="meals-h"><h2 class="sec">Comidas</h2><div class="seg sm"><button class="${hand ? '' : 'on'}" data-act="handT" data-v="0">Gramos</button><button class="${hand === true ? 'on' : ''}" data-act="handT" data-v="1">Mano</button>${S.needsV10 ? '' : `<button class="${hand === 'casera' ? 'on' : ''}" data-act="handT" data-v="2">Casera</button>`}</div></div>` : '') + meals.map((m, mi) => {
     const mk = m.id || 'n' + mi; mealByKey[mk] = m;
     const mlogs = logs.filter(l => m.id ? l.meal_id === m.id : (!l.meal_id && l.meal_name === m.name));
     mlogs.forEach(l => used.add(l.id));
@@ -495,14 +500,16 @@ async function vHoy(date, cid) {
       <div class="row-btns">${pending ? `<button class="btn sm" data-act="all" data-meal="${mk}">Marcar todo</button>` : ''}<button class="btn sm" data-act="add" data-meal="${mk}">+ Añadir</button>${opt && opt.items.length && !rep && typeof recipeModal === 'function' ? `<button class="btn sm" data-act="recipe" data-meal="${mk}">Preparación</button>` : ''}${own && typeof mealMoreModal === 'function' ? `<button class="btn sm" data-act="more" data-meal="${mk}">Más</button>` : ''}</div>
     </div>`;
   }).join('');
+  hctx.meals = mctx; hctx.rf = rf;
   if (own && isToday && typeof nextMealCardHtml === 'function') html = html.replace('<!--NEXT-->', nextMealCardHtml(mctx)); else html = html.replace('<!--NEXT-->', '');
   if (own && nut) html += `<div class="card quick-a"><h3>Acciones rápidas</h3>
     ${choices.__off ? `<p class="small swapped">Avisaste que no pudiste seguir el plan: ${esc((choices.__off.r || []).join(', '))}${choices.__off.n ? ' · ' + esc(choices.__off.n) : ''}.</p>` : ''}
-    <div class="row-btns">${plan ? '<a class="btn sm" href="#/semana">Semana del plan</a>' : ''}${yLogs.length ? '<button class="btn sm" data-act="repY">Repetir el día de ayer</button>' : ''}${plan ? '<button class="btn sm" data-act="evt">Evento social</button>' : ''}<button class="btn sm" data-act="actv">+ Actividad</button><button class="btn sm" data-act="offP">${choices.__off ? 'Editar aviso' : 'No pude seguir el plan'}</button></div></div>`;
+    <div class="row-btns">${plan ? '<a class="btn sm" href="#/semana">Semana del plan</a>' : ''}${yLogs.length ? '<button class="btn sm" data-act="repY">Repetir el día de ayer</button>' : ''}${plan ? '<button class="btn sm" data-act="evt">Evento social</button>' : ''}<button class="btn sm" data-act="actv">+ Actividad</button><button class="btn sm" data-act="offP">${choices.__off ? 'Editar aviso' : 'No pude seguir el plan'}</button>${await hk('quick')}</div></div>`;
   const orphans = logs.filter(l => !used.has(l.id));
   if (nut && orphans.length) html += `<div class="card meal"><div class="meal-h"><h3>Otros registros</h3></div>${orphans.map(logRow).join('')}</div>`;
   if (nut && plan) html += `<div class="row-btns"><a class="btn" href="#/plan-ver/${full.id}">Ver plan completo</a><a class="btn" href="#/compras/${full.id}">Lista de compras</a>${own && typeof vFuera === 'function' ? '<a class="btn" href="#/fuera">Comer fuera de casa</a>' : ''}</div>`;
-  html += tail;
+  html += await hk('afterMeals');
+  html += tail + await hk('tail');
 
   if (own && isToday && S.navAct && typeof runNavAct === 'function') { if (await runNavAct({ cid, date, water, meals: mctx })) return rerender(); }
   paint(html, {
@@ -543,7 +550,8 @@ async function vHoy(date, cid) {
         rerender();
       },
       add: el => addFoodModal({ cid, date, meal: mealByKey[el.dataset.meal], after: rerender }),
-      dellog: async el => { await DB.remove('food_logs', el.dataset.id); rerender(); }
+      dellog: async el => { await DB.remove('food_logs', el.dataset.id); rerender(); },
+      ...hookHandlers(HOOKS.hoy, hctx)
     }
   }, own ? 'Hoy' : 'Diario · ' + (client.full_name || ''));
 }
@@ -705,12 +713,15 @@ async function vCompras(id, days) {
       v.meals.forEach(m => { const os = rot(m) ? [defaultOption(m, d)].filter(o => o && o.items.length) : m.options.filter(o => o.items.length); os.forEach(o => o.items.forEach(i => { agg[i.food_id] = (agg[i.food_id] || 0) + num(i.grams) / os.length; })); });
     }
   } else plan.meals.forEach(m => { const os = m.options.filter(o => o.items.length); os.forEach(o => o.items.forEach(i => { agg[i.food_id] = (agg[i.food_id] || 0) + num(i.grams) * days / os.length; })); });
+  const fam = typeof famFactor === 'function' ? famFactor() : 1;
+  if (fam !== 1) Object.keys(agg).forEach(k => { agg[k] *= fam; });
+  const shopRows = [];
   const key = 'dp_compras_' + id; let checked = {};
   try { checked = JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) { }
   let total = 0, noPrice = 0; const coachShop = S.profile.role === 'coach';
   const qty = g => g >= 1000 ? (Math.round(g / 100) / 10).toLocaleString('es-CO') + ' kg' : Math.round(g / 5) * 5 + ' g';
   let html = `<div class="chips no-print"><a class="chip on" href="#/compras/${id}">Mercado</a>${typeof vLote === 'function' ? `<a class="chip" href="#/compras/${id}/lote">Preparación en lote</a>` : ''}</div><div class="chips no-print">${[3, 7, 14].map(d => `<a class="chip${d === days ? ' on' : ''}" href="#/compras/${id}/${d}">${d} días</a>`).join('')}</div>
-    <p class="small muted">${esc(plan.name)}. Cantidades para ${days} días ${multi ? `desde hoy, según el tipo de día de cada fecha${hasDayTypes(plan) ? ' (' + dayVariants(plan).map(v => `${esc(v.day_code || dayLabel(v))}: ${dayTypeCounts(plan, todayStr(), days)[v.id] || 0}`).join(' · ') + ')' : ''} y las rotaciones por día de la semana` : 'con rotación equitativa de las opciones de cada comida'}. Los alimentos que el plan indica cocidos se convierten a peso en crudo aproximado.</p>`;
+    <p class="small muted">${esc(plan.name)}. Cantidades para ${days} días ${multi ? `desde hoy, según el tipo de día de cada fecha${hasDayTypes(plan) ? ' (' + dayVariants(plan).map(v => `${esc(v.day_code || dayLabel(v))}: ${dayTypeCounts(plan, todayStr(), days)[v.id] || 0}`).join(' · ') + ')' : ''} y las rotaciones por día de la semana` : 'con rotación equitativa de las opciones de cada comida'}${fam !== 1 ? `, multiplicadas por ${fmtN(fam)} (personas del hogar)` : ''}. Los alimentos que el plan indica cocidos se convierten a peso en crudo aproximado.</p>`;
   for (const cat of FOOD_CATS) {
     const rows = Object.entries(agg).map(([fid, g]) => ({ f: foodOf(fid), g })).filter(x => x.f && x.f.category === cat).sort((a, b) => a.f.name.localeCompare(b.f.name, 'es'));
     if (!rows.length) continue;
@@ -719,15 +730,17 @@ async function vCompras(id, days) {
       const shown = rf ? g * rf : g;
       const name = rf ? f.name.replace(/\s*cocid[oa]s?/i, '') : f.name;
       const cost = num(f.price_kg) ? shown / 1000 * num(f.price_kg) : 0; total += cost; if (!num(f.price_kg)) noPrice++;
+      shopRows.push({ f, g, shown, cost, name });
       return `<label class="shop${checked[f.id] ? ' got' : ''}"><input type="checkbox" data-f="${f.id}" ${checked[f.id] ? 'checked' : ''}><span>${esc(name)}</span><b>${qty(shown)}</b><small>${rf ? 'en crudo' : esc(unitText(f, g))}${cost ? ' · $' + fmtInt(Math.round(cost / 100) * 100) : ''}</small>${coachShop && !S.needsV6 ? `<input class="input price-in" data-price="${f.id}" inputmode="numeric" value="${num(f.price_kg) || ''}" placeholder="$/kg" aria-label="Precio por kg">` : ''}</label>`;
     }).join('')}</div>`;
   }
   if (total) html += `<div class="card"><h3>Costo estimado</h3><div class="stats3"><div><b>$${fmtInt(Math.round(total / 1000) * 1000)}</b><small>${days} días</small></div><div><b>$${fmtInt(Math.round(total / days / 100) * 100)}</b><small>Por día</small></div><div><b>$${fmtInt(Math.round(total * 30 / days / 1000) * 1000)}</b><small>Por mes</small></div></div><p class="small muted">Con los precios por kg registrados en Biblioteca › Alimentos${noPrice ? `; ${noPrice} alimentos sin precio no se incluyen` : ''}.</p></div>`;
   else if (coachShop && !S.needsV6) html += `<p class="small muted">Escribe el precio por kg (o por litro) de cada alimento para calcular el costo del mercado.</p>`;
+  if (typeof comprasExtraHtml === 'function') html += comprasExtraHtml(shopRows, days);
   html += `<div class="row-btns no-print"><button class="btn" data-act="print">Imprimir / PDF</button><button class="btn" data-act="clear">Desmarcar todo</button></div>`;
   paint(html, {
-    change: async t => { if (t.dataset.price) { const v = num(t.value) || null; await DB.update('foods', t.dataset.price, { price_kg: v }); S.foodById[t.dataset.price].price_kg = v; toast('Precio guardado'); return vCompras(id, days); } if (t.dataset.f) { checked[t.dataset.f] = t.checked; try { localStorage.setItem(key, JSON.stringify(checked)); } catch (e) { } t.closest('.shop').classList.toggle('got', t.checked); } },
-    click: { print: () => window.print(), clear: () => { checked = {}; try { localStorage.removeItem(key); } catch (e) { } vCompras(id, days); } }
+    change: async t => { if (typeof comprasChange === 'function' && await comprasChange(t)) return vCompras(id, days); if (t.dataset.price) { const v = num(t.value) || null; await DB.update('foods', t.dataset.price, { price_kg: v }); S.foodById[t.dataset.price].price_kg = v; toast('Precio guardado'); return vCompras(id, days); } if (t.dataset.f) { checked[t.dataset.f] = t.checked; try { localStorage.setItem(key, JSON.stringify(checked)); } catch (e) { } t.closest('.shop').classList.toggle('got', t.checked); } },
+    click: Object.assign({ print: () => window.print(), clear: () => { checked = {}; try { localStorage.removeItem(key); } catch (e) { } vCompras(id, days); } }, typeof comprasHandlers === 'function' ? comprasHandlers(() => vCompras(id, days)) : {})
   }, 'Lista de compras');
 }
 
@@ -796,7 +809,7 @@ async function adherenceSection(cid, dayLink) {
 }
 
 /* Pestañas de Progreso del asesorado */
-const progSeg = a => `<div class="chips scroll tabs2">${[['historial', 'Entrenamiento'], ['progreso', 'Ejercicios'], ['rendimiento', 'Rendimiento'], ['cuerpo', 'Cuerpo'], ['adherencia', 'Nutrición'], ['logros', 'Logros'], ['fotos', 'Fotos']].filter(([k]) => typeof modOn !== 'function' || !({ rendimiento: 'tenis', logros: 'logros', fotos: 'fotos' })[k] || modOn(({ rendimiento: 'tenis', logros: 'logros', fotos: 'fotos' })[k])).map(([k, l]) => `<a class="chip${a === k ? ' on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
+const progSeg = a => `<div class="chips scroll tabs2">${[['historial', 'Entrenamiento'], ['progreso', 'Ejercicios'], ['rendimiento', 'Rendimiento'], ['cuerpo', 'Cuerpo'], ['adherencia', 'Nutrición'], ['logros', 'Logros'], ['fotos', 'Fotos'], ...HOOKS.progreso.filter(x => !x.show || x.show()).map(x => [x.key, x.label])].filter(([k]) => typeof modOn !== 'function' || !({ rendimiento: 'tenis', logros: 'logros', fotos: 'fotos' })[k] || modOn(({ rendimiento: 'tenis', logros: 'logros', fotos: 'fotos' })[k])).map(([k, l]) => `<a class="chip${a === k ? ' on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
 async function vCuerpo() { const b = await bodySection(S.profile.id); if (typeof antropometriaTab === 'function' && !S.needsV6) { const a = await antropometriaTab(S.profile.id); if ((await DB.select('anthropometry', { eq: { client_id: S.profile.id }, limit: 1 })).length) { b.html += '<h2 class="sec">Antropometría</h2>' + a.html; Object.assign(b.click, a.click); } } const pj = S.intake && S.intake.status === 'approved' && typeof projectionHtml === 'function' ? projectionHtml(S.intake.calc) : ''; paint(progSeg('cuerpo') + b.html + pj, { click: b.click }, 'Progreso'); }
 async function vAdherencia() { const a = await adherenceSection(S.profile.id, d => '#/hoy/' + d); paint(progSeg('adherencia') + a.html, {}, 'Progreso'); }
 
@@ -891,7 +904,7 @@ async function addDayType(root, src, rec) {
   for (const m of src.meals) {
     const [nm] = await DB.insert('plan_meals', { plan_id: np.id, name: m.name, time_label: m.time_label, instructions: m.instructions, position: m.position });
     for (const op of m.options) {
-      const [no] = await DB.insert('plan_options', Object.assign({ meal_id: nm.id, name: op.name, position: op.position }, op.recipe ? { recipe: op.recipe } : {}, (op.weekdays || []).length ? { weekdays: op.weekdays } : {}));
+      const [no] = await DB.insert('plan_options', Object.assign({ meal_id: nm.id, name: op.name, position: op.position }, op.recipe ? { recipe: op.recipe } : {}, op.video_url ? { video_url: op.video_url } : {}, (op.weekdays || []).length ? { weekdays: op.weekdays } : {}));
       await DB.insert('plan_items', op.items.map(i => { const f = foodOf(i.food_id); const k = fac && f ? fac[MACRO_GROUP(f.category)] : 1; return { option_id: no.id, food_id: i.food_id, grams: Math.max(1, roundG(num(i.grams) * k)), position: i.position, note: i.note }; }));
     }
   }
@@ -991,6 +1004,7 @@ async function vPlanEditor(id) {
         </div>`; }).join('')}
         <p class="opt-tot small"><b>Total ${esc(sel.name)}:</b> ${macroLine(optionTotals(sel))}</p>
         ${S.needsV6 || typeof recipeSteps !== 'function' ? '' : `<label class="field"><span>Preparación (una instrucción por línea; vacío = preparación automática)</span><textarea class="input" rows="3" data-tbl="plan_options" data-id="${sel.id}" data-f="recipe" placeholder="${esc(recipeSteps(Object.assign({}, sel, { recipe: '' })).join('\n'))}">${esc(sel.recipe || '')}</textarea></label>`}
+        ${S.needsV10 ? '' : `<label class="field"><span>Video de la receta (YouTube, Vimeo o enlace .mp4)</span><input class="input" type="url" data-tbl="plan_options" data-id="${sel.id}" data-f="video_url" value="${esc(sel.video_url || '')}" placeholder="https://…"></label>`}
       </div>` : ''}
       <button class="btn sm block" data-act="addItem" data-meal="${m.id}" data-opt="${sel ? sel.id : ''}" data-n="${sel ? sel.items.length : 0}">+ Añadir alimento</button>
       ${m.options.length > 1 ? `<p class="small muted">Promedio de la comida: ${macroLine(mav)}</p>` : ''}
@@ -1094,7 +1108,7 @@ async function copyMealInto(src, planId, mealId) {
   if (mealId) { target = (await DB.select('plan_meals', { eq: { id: mealId } }))[0]; for (const o of await DB.select('plan_options', { eq: { meal_id: mealId } })) await DB.remove('plan_options', o.id); }
   else { const n = (await DB.select('plan_meals', { eq: { plan_id: planId } })).length; [target] = await DB.insert('plan_meals', { plan_id: planId, name: src.name, time_label: src.time_label, instructions: src.instructions, position: n }); }
   for (const op of src.options) {
-    const [no] = await DB.insert('plan_options', Object.assign({ meal_id: target.id, name: op.name, position: op.position }, op.recipe ? { recipe: op.recipe } : {}, (op.weekdays || []).length ? { weekdays: op.weekdays } : {}));
+    const [no] = await DB.insert('plan_options', Object.assign({ meal_id: target.id, name: op.name, position: op.position }, op.recipe ? { recipe: op.recipe } : {}, op.video_url ? { video_url: op.video_url } : {}, (op.weekdays || []).length ? { weekdays: op.weekdays } : {}));
     await DB.insert('plan_items', op.items.map(i => ({ option_id: no.id, food_id: i.food_id, grams: i.grams, position: i.position, note: i.note })));
   }
 }
@@ -1110,11 +1124,11 @@ async function vPlantillas() {
     <h2 class="sec">Planes nutricionales</h2>
     <button class="btn primary block" data-act="newN">+ Nueva plantilla nutricional</button>
     ${np.map(p => `<div class="card"><h3>${esc(p.name)}</h3><small class="muted">${esc(targetsLine(p))}</small>
-      <div class="row-btns"><a class="btn sm primary" href="#/plan-nutri/${p.id}">Editar</a><a class="btn sm" href="#/plan-ver/${p.id}">Ver / PDF</a><button class="btn sm" data-act="asgN" data-id="${p.id}">Asignar</button><button class="btn sm danger-outline" data-act="delN" data-id="${p.id}">Eliminar</button></div></div>`).join('') || '<p class="muted small">Sin plantillas nutricionales.</p>'}
+      <div class="row-btns"><a class="btn sm primary" href="#/plan-nutri/${p.id}">Editar</a><a class="btn sm" href="#/plan-ver/${p.id}">Ver / PDF</a><button class="btn sm" data-act="asgN" data-id="${p.id}">Asignar</button>${typeof bulkAssignModal === 'function' ? `<button class="btn sm" data-act="asgNM" data-id="${p.id}">A varios</button>` : ''}<button class="btn sm danger-outline" data-act="delN" data-id="${p.id}">Eliminar</button></div></div>`).join('') || '<p class="muted small">Sin plantillas nutricionales.</p>'}
     <h2 class="sec">Rutinas de entrenamiento</h2>
     <button class="btn primary block" data-act="newR">+ Nueva plantilla de rutina</button>
     ${rt.map(r => `<div class="card"><h3>${esc(r.name)}</h3><small class="muted">${days.filter(d => d.routine_id === r.id).length} días</small>
-      <div class="row-btns"><a class="btn sm primary" href="#/rutina/${r.id}">Editar</a><button class="btn sm" data-act="asgR" data-id="${r.id}">Asignar</button><button class="btn sm danger-outline" data-act="delR" data-id="${r.id}">Eliminar</button></div></div>`).join('') || '<p class="muted small">Sin plantillas de rutina. También puedes guardar como plantilla la rutina de un asesorado con «Duplicar».</p>'}`;
+      <div class="row-btns"><a class="btn sm primary" href="#/rutina/${r.id}">Editar</a><button class="btn sm" data-act="asgR" data-id="${r.id}">Asignar</button>${typeof bulkAssignModal === 'function' ? `<button class="btn sm" data-act="asgRM" data-id="${r.id}">A varios</button>` : ''}<button class="btn sm danger-outline" data-act="delR" data-id="${r.id}">Eliminar</button></div></div>`).join('') || '<p class="muted small">Sin plantillas de rutina. También puedes guardar como plantilla la rutina de un asesorado con «Duplicar».</p>'}`;
   paint(html, {
     click: {
       newN: async () => { const name = prompt('Nombre de la plantilla:', 'Plantilla · Recomposición'); if (!name) return; const id = await createBlankPlan({ isTemplate: true, name: name.trim() }); location.hash = '#/plan-nutri/' + id; },
@@ -1122,6 +1136,7 @@ async function vPlantillas() {
       delN: async el => { if (!confirm('¿Eliminar la plantilla?')) return; await DB.remove('nutrition_plans', el.dataset.id); route(); },
       newR: async () => { const name = prompt('Nombre de la plantilla:', 'Plantilla · Fuerza 3 días'); if (!name) return; const [r] = await DB.insert('routines', { client_id: null, is_template: true, name: name.trim(), notes: '', active: false }); await DB.insert('routine_days', { routine_id: r.id, name: 'Día 1', position: 0 }); location.hash = '#/rutina/' + r.id; },
       asgR: el => duplicateModal(el.dataset.id),
+      asgNM: el => bulkAssignModal('n', el.dataset.id), asgRM: el => bulkAssignModal('r', el.dataset.id),
       delR: async el => { if (!confirm('¿Eliminar la plantilla de rutina?')) return; await DB.remove('routines', el.dataset.id); route(); }
     }
   }, 'Plantillas');
@@ -1161,6 +1176,8 @@ function vAlimento(id) {
       ${S.needsV5 || typeof foodMeta !== 'function' ? '' : (() => { const mt = isNew ? { cost: 2, uses: '' } : foodMeta(f); return `<div class="rex-grid">${S.needsV6 ? '' : fld('price_kg', 'Precio por kg o L ($)', f.price_kg)}<label><span>Costo (generador de menús)</span><select class="input" name="cost_tier">${[1, 2, 3].map(c => `<option value="${c}"${c === mt.cost ? ' selected' : ''}>${COST_LBL[c]}</option>`).join('')}</select></label></div>
       <div class="field"><span>Se usa en</span><div class="chips">${Object.entries(USE_LBL).map(([k, l]) => `<label class="chip"><input type="checkbox" name="mu_${k}" ${mt.uses.includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}</div></div>
       <p class="small muted">El generador de menús elige los alimentos según el presupuesto de cada asesorado y el tipo de comida. Sin marcar, se usa la clasificación por grupo.</p>`; })()}
+      ${S.needsV10 ? '' : `<div class="rex-grid">${fld('sodium_mg', 'Sodio mg', f.sodium_mg)}${fld('sugar_g', 'Azúcares g', f.sugar_g)}</div>
+      ${storeList().length ? `<div class="field"><span>Precio por kg o L en cada supermercado ($)</span><div class="rex-grid">${storeList().map(st => `<label><span>${esc(st)}</span><input class="input" name="st_${esc(st)}" inputmode="numeric" value="${esc(((f.prices || {})[st]) ?? '')}"></label>`).join('')}</div></div>` : ''}`}
       <div class="rex-grid three">${fld('fiber', 'Fibra g', f.fiber)}<label><span>Medida casera</span><input class="input" name="unit_name" value="${esc(f.unit_name || '')}" placeholder="unidad, taza…"></label>${fld('unit_grams', 'g por medida', f.unit_grams)}</div>
       <button class="btn primary block" type="submit">${isNew ? 'Crear alimento' : 'Guardar cambios'}</button>
     </form>
@@ -1175,6 +1192,7 @@ function vAlimento(id) {
     const fd = Object.fromEntries(new FormData(ev.target));
     const rec = { name: fd.name.trim(), category: fd.category, kcal: num(fd.kcal), protein: num(fd.protein), carbs: num(fd.carbs), fat: num(fd.fat), fiber: num(fd.fiber), unit_name: fd.unit_name.trim() || null, unit_grams: num(fd.unit_grams) || null };
     if (fd.price_kg !== undefined) rec.price_kg = num(fd.price_kg) || null;
+    if (fd.sodium_mg !== undefined) { rec.sodium_mg = fd.sodium_mg === '' ? null : num(fd.sodium_mg); rec.sugar_g = fd.sugar_g === '' ? null : num(fd.sugar_g); const pr = {}; Object.keys(fd).filter(k => k.startsWith('st_') && num(fd[k])).forEach(k => { pr[k.slice(3)] = num(fd[k]); }); rec.prices = pr; }
     if (fd.cost_tier) { rec.cost_tier = num(fd.cost_tier); const mu = Object.keys(USE_LBL).filter(k => fd['mu_' + k]); rec.meal_use = mu.length ? mu : null; }
     if (!rec.name) return toast('Escribe el nombre', 'error');
     if (S.foods.some(x => norm(x.name) === norm(rec.name) && x.id !== id)) return toast('Ya existe un alimento con ese nombre', 'error');

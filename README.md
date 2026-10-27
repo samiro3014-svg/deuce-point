@@ -6,6 +6,44 @@ Dirección: https://samiro3014-svg.github.io/deuce-point/
 
 ---
 
+## Novedades de la versión 10 · alimentación, entrenamiento, seguimiento y negocio
+
+**Alimentación**
+- Lista de compras: **comparación por supermercado** (precio por kg en cada uno; total por tienda y compra combinada), **opciones para ahorrar** con equivalentes más baratos y **personas del hogar** (adultos y niños).
+- Al reemplazar un alimento: costo de cada porción, opción económica y aviso **«Excluido en la valoración»** (alergias, restricciones, «no me gusta»).
+- **Modo viaje** (avión, carretera, torneo fuera): kit de refrigerios calculado con los macronutrientes de tus refrigerios del plan y lista para empacar.
+- **Comer fuera de casa:** comida típica, mexicana y buffet, y registro rápido de la comida según la guía (80 / 100 / 130 %).
+- **Video de la receta** por opción del menú (editor del plan). **Escáner:** alérgenos, equivalencia con la comida del plan y fibra/azúcar/sodio.
+- **Ajuste por tendencia de peso** (Pendientes): regresión de los pesos de 3–4 semanas; aplica ±kcal y avisa al asesorado.
+- **Carga de carbohidratos** de 48 h por torneo (g/kg configurable). **Hidratación por clima** con la ciudad del asesorado (Open-Meteo). **Alcohol** con su energía y bebidas estándar.
+- **Fibra, sodio y azúcares** del día (sodio y azúcar se registran en Biblioteca › Alimentos). **Refrigerios de torneo** con calculadora por duración. **Medidas caseras** (pocillo, cucharón, tajada…) editables en Ajustes; botón «Casera» en Hoy.
+
+**Entrenamiento**
+- **Bloques de periodización** con línea de tiempo, rutina por bloque y activación en Pendientes o automática. El asesorado ve el bloque y la semana en Entreno.
+- **Fuerza estimada por mes** (4 ejercicios principales). **VFC, pulso en reposo y horas de sueño** en el bienestar; la VFC baja activa la sugerencia de ajuste de la sesión.
+- **Calentamiento RAMP de tenis**, movilidad de cadera y hombro, recuperación y respiración **guiados con temporizador**. **Saques y golpes** por sesión con aviso de aumento brusco.
+- **Monotonía y tensión** (Foster) en Carga. **Video propio** por ejercicio (archivo privado). **Entrenar en casa** con el equipo disponible. **Progresión por RIR objetivo**.
+
+**Experiencia del asesorado**
+- **Registro sin conexión** (cola local que se envía al volver la señal). **Contador** de comidas pendientes en el ícono y **accesos directos** (mantener pulsado el ícono en Android).
+- «Solo avisar lo que falta» en las notificaciones. **Logros clínicos** (sueño, proteína, fibra, bienestar, pasos, metas). **Notas del día** con estado de ánimo.
+- **Fotos y audios en el chat**. **Calendario mensual** por cumplimiento. **Meta semanal** propuesta por el asesorado y aprobada o ajustada por el entrenador. **Tutoriales** (videos en Ajustes y guía rápida).
+
+**Seguimiento y análisis**
+- **Panel del grupo**, **informe para el entrenador del club** (requiere confirmar la autorización), **perfiles similares**, **riesgo de abandono**, ciclo menstrual cruzado con calorías, saciedad y volumen.
+- **Laboratorios** con rangos de referencia y gráfica por examen; **bioimpedancia** comparando solo mediciones en las mismas condiciones.
+- **Tipo de informe mensual** por asesorado (tenista, pérdida de peso, ganancia, solo nutrición). **Check-in en un toque** con respuestas guardadas. **Agenda de citas** con horarios, solicitudes, confirmación y avisos 24 h y 2 h antes.
+
+**Negocio**
+- **Pago reportado** por el asesorado con comprobante y cupón; al confirmarlo se registra el pago, se renueva la membresía y se avisa. **Retos pagos** e **inscripción**; **asignar una plantilla a varios asesorados**.
+- **Cupones** y **promoción de temporada** (también en la página de captación). **Afiliados** con enlace, prospectos, asesorados y comisión. **Recibos de pago** numerados (no son factura electrónica).
+- **Testimonios publicados** en la página de captación (solo con autorización). **NPS por mes**. **Contrato de servicio** con firma en la app y versión. **Asistentes** con asesorados asignados (Ajustes › Equipo y la ficha). **Marca propia** (nombre, colores y logo).
+
+## Actualización a la versión 10
+1. **Supabase › SQL Editor:** ejecutar `supabase/migracion-v10.sql` (requiere la v9).
+2. **Supabase › Edge Functions › enviar-notificaciones:** reemplazar el código por `supabase/functions/enviar-notificaciones/index.ts` y publicar (solo avisos de lo que falta, citas, pagos y metas).
+3. **Ajustes:** supermercados, medidas caseras, horarios de agenda, cupones, afiliados, datos de recibos, contrato y marca.
+
 ## Novedades de la versión 9 · registro rápido, días difíciles y seguimiento
 
 **Para el asesorado (pantalla Hoy)**

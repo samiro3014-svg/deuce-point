@@ -136,10 +136,11 @@ async function loadSettings() {
   catch (e) { console.warn('app_settings no disponible: ejecutar supabase/migracion-v3.sql', e); S.needsMigration = true; }
   S.needsV4 = !(r && r.data && num(r.data.schema_version) >= 4);
   S.needsV5 = !(r && r.data && num(r.data.schema_version) >= 5);
-  if (DEMO && r && r.data && num(r.data.schema_version) < 9) { r.data.schema_version = 9; await DB.update('app_settings', 1, { data: r.data }); }
+  if (DEMO && r && r.data && num(r.data.schema_version) < 10) { r.data.schema_version = 10; await DB.update('app_settings', 1, { data: r.data }); }
   S.needsV6 = !(r && r.data && num(r.data.schema_version) >= 6);
   S.needsV7 = !(r && r.data && num(r.data.schema_version) >= 7);
   S.needsV9 = !(r && r.data && num(r.data.schema_version) >= 9);
+  S.needsV10 = !(r && r.data && num(r.data.schema_version) >= 10);
   S.settings = Object.assign({}, SETTINGS_DEF, r ? r.data || {} : {});
 }
 async function saveSettings(patch) {
@@ -1037,6 +1038,7 @@ async function coachCheckinsTab(cid) {
       <div class="suggest ${sug.delta ? 'act' : ''}"><b>Sugerencia:</b> ${esc(sug.text)}</div>
       ${ck.status === 'pending' ? `
         <label class="field"><span>Respuesta para el asesorado</span><textarea class="input" rows="3" data-reply="${ck.id}" placeholder="Indicaciones para la próxima semana…"></textarea></label>
+        ${typeof ckQuickHtml === 'function' ? ckQuickHtml(ck.id) : ''}
         <div class="row-btns">${sug.delta && plan ? `<button class="btn" data-act="ckApply" data-id="${ck.id}">Aplicar ${sug.delta > 0 ? '+' : '−'}${Math.abs(sug.delta)} kcal al plan</button>` : ''}${sug.cardio ? `<button class="btn" data-act="ckCardio" data-id="${ck.id}">Aplicar +${sug.cardio} min de cardio Zona 2</button>` : ''}<button class="btn primary" data-act="ckDone" data-id="${ck.id}">Enviar respuesta y marcar revisado</button></div>`
       : (ck.coach_reply ? `<p class="small"><b>Tu respuesta:</b> ${esc(ck.coach_reply)}</p>` : '')}
     </div>`;
@@ -1066,7 +1068,8 @@ async function coachCheckinsTab(cid) {
         const ta = document.querySelector(`[data-reply="${el.dataset.id}"]`);
         await DB.update('checkins', el.dataset.id, { coach_reply: (ta && ta.value.trim()) || null, status: 'reviewed', reviewed_at: new Date().toISOString() });
         toast('Check-in revisado'); route();
-      }
+      },
+      ...(typeof ckQuickHandlers === 'function' ? ckQuickHandlers() : {})
     }
   };
 }
@@ -1111,10 +1114,11 @@ async function inboxInner(clients) {
   if (typeof inboxV9Rows === 'function') rows.push(...await inboxV9Rows(byId).catch(() => []));
   if (typeof inboxVideoRows === 'function') rows.push(...await inboxVideoRows(byId));
   if (typeof inboxQuestRows === 'function') rows.push(...await inboxQuestRows(byId));
+  for (const fn of HOOKS.inbox) rows.push(...await fn(byId).catch(e => { console.warn(e); return []; }));
   intakes.filter(i => byId[i.client_id]).forEach(i => rows.push(`<a class="ib-row" href="#/asesorado/${i.client_id}/valoracion"><span class="ib-tag v">Valoración</span><span class="ib-n">${esc(byId[i.client_id].full_name || byId[i.client_id].email)}</span><span class="ib-m">${(i.flags || []).filter(f => f.level !== 'info').length ? `<span class="warn">${(i.flags || []).filter(f => f.level !== 'info').length} alertas</span>` : 'Sin alertas'}</span></a>`));
   cks.filter(c => byId[c.client_id]).forEach(c => rows.push(`<a class="ib-row" href="#/asesorado/${c.client_id}/checkins"><span class="ib-tag c">Check-in</span><span class="ib-n">${esc(byId[c.client_id].full_name || '')}</span><span class="ib-m">${fmtDM(parseDay(c.check_date))}</span></a>`));
   inactive.forEach(c => rows.push(`<div class="ib-row"><span class="ib-tag i">Inactivo</span><a class="ib-n" href="#/asesorado/${c.id}/seguimiento">${esc(c.full_name || c.email)}</a><span class="ib-m">${lastAct[c.id] ? daysBetween(lastAct[c.id], todayStr()) + ' días' : 'sin registros'} ${waBtn(c.phone, `Hola ${firstName(c.full_name)}, ¿cómo vas con tu plan esta semana? Recuerda registrar tus comidas y entrenamientos en Deuce Point.`, 'WhatsApp', 'chip wa')}</span></div>`));
-  return `<div class="card inbox"><div class="day-h"><h3>Pendientes</h3>${isCoach() ? '<div class="row-btns"><a class="btn sm" href="#/negocio">Negocio</a><a class="btn sm" href="#/ajustes">Ajustes</a></div>' : ''}</div>
+  return `<div class="card inbox"><div class="day-h"><h3>Pendientes</h3>${isCoach() ? `<div class="row-btns">${typeof vGrupo === 'function' ? '<a class="btn sm" href="#/grupo">Grupo</a>' : ''}${typeof vAgenda === 'function' && !S.needsV10 ? '<a class="btn sm" href="#/agenda">Agenda</a>' : ''}<a class="btn sm" href="#/negocio">Negocio</a><a class="btn sm" href="#/ajustes">Ajustes</a></div>` : ''}</div>
     ${rows.length ? rows.join('') : '<p class="small muted">Sin pendientes. Las valoraciones nuevas, los check-ins, las renovaciones, los informes mensuales y los asesorados sin registros durante 5 días aparecen aquí.</p>'}</div>${S.needsV5 && typeof V5_NOTICE === 'string' ? V5_NOTICE : ''}`;
 }
 
@@ -1160,7 +1164,7 @@ async function vAjustes() {
     <div class="card"><h3>Textos por defecto</h3>
       <label class="field"><span>Indicaciones del plan nutricional</span><textarea class="input" rows="4" data-s="plan_notes">${esc(s.plan_notes || DEFAULT_PLAN_NOTES)}</textarea></label>
       <label class="field"><span>Indicaciones de la rutina</span><textarea class="input" rows="4" data-s="routine_notes">${esc(s.routine_notes || DEFAULT_ROUTINE_NOTES)}</textarea></label></div>
-    <div class="card"><h3>Torneos y periodización</h3><div class="rex-grid">${n('pre_carb_gkg', 'Carbs víspera g/kg')}${n('match_carb_gkg', 'Carbs día de torneo g/kg')}${n('taper_days', 'Días de descarga previa')}${n('taper_pct', '% de series en la descarga')}</div>
+    <div class="card"><h3>Torneos y periodización</h3><div class="rex-grid">${n('pre_carb_gkg', 'Carbs víspera g/kg')}${S.needsV10 ? '' : n('load_carb_gkg', 'Carga de carbs 48 h g/kg')}${n('match_carb_gkg', 'Carbs día de torneo g/kg')}${n('taper_days', 'Días de descarga previa')}${n('taper_pct', '% de series en la descarga')}</div>
       <p class="small muted">Valores por defecto: 6 g/kg la víspera, 7 g/kg en días de torneo, 7 días de descarga con el 60 % de las series (40 % durante el torneo).</p>
       <h4>Hidratación</h4><div class="rex-grid">${n('sweat_na_mgl', 'Sodio en sudor mg/L')}${n('sweat_na_salty', 'Sudor salado mg/L')}</div></div>
     <div class="card"><h3>Membresías</h3><div class="rex-grid">${n('renew_days', 'Aviso de renovación (días antes)')}</div><p class="small muted">Las renovaciones próximas y vencidas aparecen en Pendientes con el mensaje de WhatsApp listo para enviar.</p></div>
@@ -1182,14 +1186,16 @@ async function vAjustes() {
       <p class="small muted">Se agregan como un paso adicional antes de las autorizaciones. Las respuestas aparecen en la valoración y en el paquete de análisis para tu IA. A los asesorados actuales puedes enviarles preguntas desde su expediente.</p></div>
     <div class="card"><h3>Respuestas guardadas para mensajes</h3><label class="field"><span>Una respuesta por línea</span><textarea class="input" rows="4" data-s="quick_replies">${esc(s.quick_replies || '')}</textarea></label></div>
     <div class="card"><h3>Contacto</h3><label class="field"><span>Tu número de WhatsApp</span><input class="input" data-s="whatsapp" inputmode="tel" value="${esc(s.whatsapp || '')}" placeholder="3001234567"></label><p class="small muted">Se muestra a los asesorados para escribirte directamente.</p></div>
-    ${typeof coachKeyCardHtml === 'function' ? await coachKeyCardHtml() : ''}`, {
+    ${typeof coachKeyCardHtml === 'function' ? await coachKeyCardHtml() : ''}
+    ${(await Promise.all(HOOKS.ajustes.map(x => x.html().catch(() => '')))).join('')}`, {
     change: async t => {
+      for (const x of HOOKS.ajustes) if (x.change && await x.change(t)) return;
       if (t.dataset.pl) { const pl = Object.assign({}, S.settings.pay_links || {}, { [t.dataset.pl]: t.value.trim() }); await saveSettings({ pay_links: pl }); return toast('Guardado'); }
       const k = t.dataset.s; if (!k) return;
       const v = t.type === 'checkbox' ? t.checked : t.dataset.num ? (t.value.trim() === '' ? null : num(t.value)) : t.value.trim();
       await saveSettings({ [k]: v }); toast('Guardado');
     },
-    click: Object.assign({}, typeof coachKeyHandlers === 'function' ? coachKeyHandlers() : {}, typeof vapidHandlers === 'object' ? vapidHandlers : {}, typeof qTemplateHandlers === 'object' ? qTemplateHandlers : {}, typeof autoMsgSettingsHandlers === 'object' ? autoMsgSettingsHandlers : {})
+    click: Object.assign({}, typeof coachKeyHandlers === 'function' ? coachKeyHandlers() : {}, typeof vapidHandlers === 'object' ? vapidHandlers : {}, typeof qTemplateHandlers === 'object' ? qTemplateHandlers : {}, typeof autoMsgSettingsHandlers === 'object' ? autoMsgSettingsHandlers : {}, hookHandlers(HOOKS.ajustes))
   }, 'Ajustes');
 }
 
@@ -1204,6 +1210,14 @@ function progressionHint(e) {
   if (!top || /s$/.test(String(t.reps).trim())) return null;
   const maxW = Math.max(...p.map(s => num(s.w)));
   if (!(maxW > 0)) return null;
+  // Progresión por RIR objetivo (v10): si la sesión anterior registró RIR, la carga se ajusta según la diferencia con el objetivo
+  const tRir = parseFloat(String(t.rir || '').replace(',', '.'));
+  const rirs = p.filter(s => num(s.w) === maxW && s.rir !== '' && s.rir != null && isFinite(parseFloat(s.rir))).map(s => parseFloat(s.rir));
+  if (isFinite(tRir) && rirs.length) {
+    const avg = rirs.reduce((a, b) => a + b, 0) / rirs.length; const diff = avg - tRir;
+    if (diff >= 1) { const nw = Math.round(maxW * (1 + Math.min(0.1, 0.025 * Math.floor(diff))) * 2) / 2; if (nw > maxW) return { w: nw, up: true, text: `La sesión anterior terminaste con RIR ${fmtN(avg)} y el objetivo es ${fmtN(tRir)}: sube a ${fmtN(nw)} kg (≈ 2,5 % por cada repetición de reserva adicional).` }; }
+    if (diff <= -1) { const nw = Math.round(maxW * (1 - Math.min(0.1, 0.025 * Math.floor(-diff))) * 2) / 2; return { w: nw, text: `La sesión anterior terminaste con RIR ${fmtN(avg)}, por debajo del objetivo (${fmtN(tRir)}): baja a ${fmtN(nw)} kg y mantén la técnica.` }; }
+  }
   const work = p.filter(s => num(s.w) === maxW);
   if (work.every(s => s.r >= top)) {
     const inc = Math.max(maxW * 0.025, maxW >= 40 ? 2.5 : 1);

@@ -47,9 +47,9 @@ function recipeSteps(o, rf = 1) {
 }
 function recipeModal(o, rf) {
   const st = recipeSteps(o, rf);
-  modal(`${modalHead('Preparación · ' + o.name)}<ol class="recipe">${st.map(s => `<li>${esc(s)}</li>`).join('')}</ol>${o.recipe ? '' : '<p class="small muted">Preparación sugerida a partir de los alimentos y porciones de la opción. Pesar los alimentos en el estado indicado.</p>'}`);
+  modal(`${modalHead('Preparación · ' + o.name)}${o.video_url && typeof videoEmbed === 'function' ? videoEmbed(o.video_url) || `<a class="btn block" href="${esc(o.video_url)}" target="_blank" rel="noopener">Ver el video de la receta</a>` : ''}<ol class="recipe">${st.map(s => `<li>${esc(s)}</li>`).join('')}</ol>${o.recipe ? '' : '<p class="small muted">Preparación sugerida a partir de los alimentos y porciones de la opción. Pesar los alimentos en el estado indicado.</p>'}`);
 }
-const recipeDocHtml = o => { const st = recipeSteps(o); return st.length ? `<p class="small"><b>Preparación</b></p><ol class="doc-repl">${st.map(s => `<li>${esc(s)}</li>`).join('')}</ol>` : ''; };
+const recipeDocHtml = o => { const st = recipeSteps(o); return (st.length ? `<p class="small"><b>Preparación</b></p><ol class="doc-repl">${st.map(s => `<li>${esc(s)}</li>`).join('')}</ol>` : '') + (o.video_url ? `<p class="small">Video de la receta: <a href="${esc(o.video_url)}">${esc(o.video_url)}</a></p>` : ''); };
 
 /* =====================================================================
    Antropometría ISAK
@@ -272,7 +272,8 @@ async function rendCiclo(cid, info) {
     <div class="card"><h3>Inicios de periodo</h3><div class="rex-grid"><label><span>Fecha</span><input class="input" type="date" id="cy-d" value="${todayStr()}"></label></div><button class="btn primary block" data-act="cyAdd">Registrar</button>
       ${starts.length ? `<p class="small">${starts.slice(-8).reverse().map(s => `${fmtDM(parseDay(s.start_date))} <button class="linkbtn" data-act="cyDel" data-id="${s.id}">eliminar</button>`).join(' · ')}</p>` : ''}
       <p class="small muted">Fases estimadas por calendario: menstrual días 1–5, ovulatoria alrededor del día (duración − 14), lútea hasta el siguiente periodo. Es una estimación; la respuesta individual varía.</p></div>
-    ${chart('energy', 'Energía (bienestar diario)', 5)}${chart('mood', 'Ánimo (bienestar diario)', 5)}${chart('hunger', 'Hambre (check-in)', 10)}${chart('perf', 'Rendimiento (check-in)', 10)}`;
+    ${chart('energy', 'Energía (bienestar diario)', 5)}${chart('mood', 'Ánimo (bienestar diario)', 5)}${chart('hunger', 'Hambre (check-in)', 10)}${chart('perf', 'Rendimiento (check-in)', 10)}
+    ${typeof cycleExtraHtml === 'function' ? await cycleExtraHtml(cid, starts) : ''}`;
   return {
     html, click: {
       cyAdd: async () => { const d = $('#cy-d').value; if (!d) return; if (!starts.some(s => s.start_date === d)) await DB.insert('cycle_logs', { client_id: cid, start_date: d }); toast('Registrado'); route(); },
@@ -299,22 +300,37 @@ async function vFuera() {
     ['Comida rápida', ['Hamburguesa sencilla o de pollo a la plancha, sin papas; agregar ensalada.', 'Sándwich o wrap de pollo con vegetales, sin salsas o con salsa aparte.', 'Pizza: 2 porciones de masa delgada con proteína (pollo, jamón) y vegetales, más ensalada.', 'Bebida sin azúcar.'], ['Combos agrandados', 'Doble queso, tocineta, salsas cremosas', 'Perro caliente con papitas y salsas']],
     ['Panadería', ['Huevos pericos o revueltos con 1 arepa o 1 pan.', 'Calentado: porción pequeña con huevo y sin chicharrón.', 'Café o chocolate en leche sin azúcar adicional.', 'Pandebono o almojábana: máximo 1 unidad, acompañada de proteína (huevo, queso, yogur).'], ['Buñuelos, empanadas y pasteles fritos', 'Roscones y tortas']],
     ['Comida china, wok o sushi', [`Wok de pollo, res o camarón con vegetales: ${P}.`, `Arroz blanco en lugar de arroz frito: ${C}.`, 'Sushi: 8–10 piezas de rollos sin tempura ni queso crema, o sashimi.'], ['Lumpias, tempura, arroz frito, salsas agridulces']],
+    ['Comida típica (bandeja paisa, sancocho, ajiaco, cazuela)', [`Sancocho o ajiaco: 1 plato hondo, con la presa de pollo sin piel como proteína (${P}); sin arroz adicional o con media porción.`, 'Bandeja: elegir carne asada o molida, fríjol, arroz o arepa (uno de los dos), aguacate y ensalada; el huevo frito cuenta como grasa de la comida.', 'Cazuela de mariscos o de fríjoles: 1 porción mediana sin acompañamientos fritos.'], ['Chicharrón, chorizo y morcilla en la misma comida', 'Patacón y tajadas fritas junto con arroz y arepa']],
+    ['Comida mexicana', [`Burrito o tazón con pollo o carne, fríjol, arroz y vegetales: ${P}.`, '2 o 3 tacos de tortilla de maíz con proteína a la plancha y pico de gallo.', 'Guacamole como grasa de la comida (2 cucharadas).'], ['Nachos con queso fundido', 'Crema agria y queso en exceso', 'Tortillas fritas (tostadas, chimichanga)']],
+    ['Buffet o restaurante de hotel', ['Primero, la mitad del plato con ensaladas y verduras.', `Proteína: ${P}.`, `Carbohidrato: ${C}; un solo tipo.`, 'Una sola vuelta al buffet; postre: fruta.'], ['Varios platos de prueba de todo', 'Panes, salsas y postres en la misma comida']],
     ['Tienda o estación de servicio (refrigerio)', ['Yogur griego o kumis + fruta.', 'Queso o maní (un puñado) + fruta.', 'Atún en lata + galletas de arroz.', 'Bebida: agua o bebida hidratante después de entrenar.'], ['Paquetes, gaseosas, galletas rellenas, chocolatinas']]];
   paint(`<a class="linkbtn" href="#/hoy">← Hoy</a>
     <p class="small muted">${t ? `Porciones calculadas con tu almuerzo del plan (${fmtInt(t.kcal)} kcal · P ${fmtInt(t.protein)} g · C ${fmtInt(t.carbs)} g · G ${fmtInt(t.fat)} g). Palma = tamaño y grosor de la palma de la mano sin dedos.` : 'Sin plan activo: porciones generales.'} Registra la comida en Hoy con «+ Añadir alimento» o «Registro rápido».</p>
-    ${S_.map(([h, ok, no]) => `<div class="card"><h3>${esc(h)}</h3><ul class="plain ok">${ok.map(x => `<li>${esc(x)}</li>`).join('')}</ul><p class="small"><b>Evitar:</b> ${esc(no.join('; '))}.</p></div>`).join('')}`, {}, 'Comer fuera de casa');
+    ${plan && !S.needsV10 ? `<div class="card"><h3>Registrar la comida</h3><label class="field"><span>Comida del plan</span><select class="input" id="fu-m">${plan.meals.map(m => `<option value="${m.id}"${m === lunch ? ' selected' : ''}>${esc(m.name)}</option>`).join('')}</select></label>
+      <div class="row-btns"><button class="btn sm" data-act="fuLog" data-k="0.8">Comí menos que la guía</button><button class="btn sm primary" data-act="fuLog" data-k="1">Seguí la guía</button><button class="btn sm" data-act="fuLog" data-k="1.3">Comí más que la guía</button></div>
+      <p class="small muted">Se registra en Hoy con el aporte promedio de esa comida del plan (o 80 % / 130 %). Es una estimación: si conoces lo que comiste, regístralo alimento por alimento.</p></div>` : ''}
+    ${S_.map(([h, ok, no]) => `<div class="card"><h3>${esc(h)}</h3><ul class="plain ok">${ok.map(x => `<li>${esc(x)}</li>`).join('')}</ul><p class="small"><b>Evitar:</b> ${esc(no.join('; '))}.</p></div>`).join('')}`, {
+    click: {
+      fuLog: async el => {
+        const m = plan.meals.find(x => x.id === $('#fu-m').value); if (!m) return; const a = mealAvg(m); const k = num(el.dataset.k);
+        await DB.insert('food_logs', { client_id: S.profile.id, log_date: todayStr(), meal_id: m.id, meal_name: m.name, food_id: null, plan_item_id: null, name: `Comida fuera de casa (${k === 1 ? 'según la guía' : k < 1 ? 'porción menor' : 'porción mayor'})`, grams: null, kcal: r1(a.kcal * k), protein: r1(a.protein * k), carbs: r1(a.carbs * k), fat: r1(a.fat * k) });
+        if (typeof setChoice === 'function') await setChoice(S.profile.id, todayStr(), ch => { ch.__rep = Object.assign({}, ch.__rep || {}, { [m.id]: { l: 'Comida fuera de casa' } }); });
+        toast('Registrado en ' + m.name); location.hash = '#/hoy';
+      }
+    }
+  }, 'Comer fuera de casa');
 }
 
 /* =====================================================================
    Registro por código de barras (Open Food Facts)
    ===================================================================== */
 async function offLookup(code) {
-  const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_es,brands,nutriments,serving_quantity,quantity`);
+  const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=product_name,product_name_es,brands,nutriments,serving_quantity,quantity,allergens_tags,ingredients_text_es,ingredients_text`);
   if (!r.ok) throw new Error('No se pudo consultar Open Food Facts.');
   const j = await r.json(); if (!j || j.status !== 1 || !j.product) return null;
   const p = j.product, n = p.nutriments || {};
   const kcal = num(n['energy-kcal_100g']) || (num(n.energy_100g) ? num(n.energy_100g) / 4.184 : 0);
-  return { code, name: [p.product_name_es || p.product_name, p.brands && p.brands.split(',')[0]].filter(Boolean).join(' · ') || 'Producto ' + code, kcal, protein: num(n.proteins_100g), carbs: num(n.carbohydrates_100g), fat: num(n.fat_100g), serving: num(p.serving_quantity) || 0 };
+  return { code, name: [p.product_name_es || p.product_name, p.brands && p.brands.split(',')[0]].filter(Boolean).join(' · ') || 'Producto ' + code, kcal, protein: num(n.proteins_100g), carbs: num(n.carbohydrates_100g), fat: num(n.fat_100g), fiber: num(n.fiber_100g), sodium: num(n.sodium_100g) * 1000, sugar: num(n.sugars_100g), serving: num(p.serving_quantity) || 0, allergens: (p.allergens_tags || []).map(a => String(a).replace(/^[a-z]{2}:/, '')), ingredients: p.ingredients_text_es || p.ingredients_text || '' };
 }
 function stopCamera() { if (S.camStream) { try { S.camStream.getTracks().forEach(t => t.stop()); } catch (e) { } S.camStream = null; } if (S.camCtl) { try { S.camCtl.stop(); } catch (e) { } S.camCtl = null; } clearInterval(S.camTick); }
 async function startScanner(video, onCode) {
@@ -334,6 +350,7 @@ function barcodeModal(o) {
   let prod = null;
   const draw = () => modal(`${modalHead('Escanear código de barras')}
     ${prod ? `<div class="card flat"><b>${esc(prod.name)}</b><div class="small muted">Por 100 g: ${fmtInt(prod.kcal)} kcal · P ${fmtN(prod.protein)} g · C ${fmtN(prod.carbs)} g · G ${fmtN(prod.fat)} g</div>
+        ${typeof scanExtraHtml === 'function' ? scanExtraHtml(prod, o) : ''}
         <label class="field"><span>Cantidad (g o ml)</span><input class="input" id="bc-g" inputmode="decimal" value="${prod.serving || 100}"></label>
         <button class="btn primary block" data-act="bcSave">Añadir a ${esc(o.meal.name)}</button><button class="btn block" data-act="bcAgain">Escanear otro</button></div>
         <p class="small muted">Datos de Open Food Facts (base colaborativa). Verifica que coincidan con la etiqueta del empaque.</p>`
@@ -349,6 +366,7 @@ function barcodeModal(o) {
   const h = {
     click: {
       bcFind: () => find($('#bc-c').value),
+      bcUse: el => { $('#bc-g').value = el.dataset.g; },
       bcAgain: () => { prod = null; draw(); begin(); },
       bcSave: async () => {
         const g = num($('#bc-g').value); if (g <= 0) return toast('Indica la cantidad', 'error'); const k = g / 100;

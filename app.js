@@ -11,6 +11,9 @@ const DEMO = !CFG.SUPABASE_URL || !CFG.SUPABASE_ANON_KEY;
 const MUSCLES = ['Pecho', 'Espalda', 'Hombros', 'Bíceps', 'Tríceps', 'Cuádriceps', 'Isquiotibiales', 'Glúteos', 'Pantorrillas', 'Core', 'Antebrazo', 'Potencia', 'Manguito rotador', 'Prevención'];
 let sb = null;
 const S = { profile: null, exercises: [], exById: {}, tick: null };
+/* Puntos de extensión para los módulos (v10): rutas, tarjetas de Hoy, pendientes, ajustes, perfil y pestañas de la ficha */
+const HOOKS = { routes: {}, coachRoutes: {}, nav: {}, coachNav: {}, hoy: [], inbox: [], inboxClick: [], fichaHead: [], perfilExtra: [], ajustes: [], perfilClient: [], perfilCoach: [], fichaTabs: [], planTop: [], progreso: [], boot: [] };
+const hookHandlers = (list, ...a) => Object.assign({}, ...list.map(x => (x.click ? x.click(...a) : null) || {}));
 
 /* ---------- utilidades ---------- */
 const $ = (s, r = document) => r.querySelector(s);
@@ -66,7 +69,7 @@ function matchRow(row, o) {
 const CASCADE = {
   routines: [['routine_days', 'routine_id']], routine_days: [['routine_exercises', 'day_id']], workouts: [['workout_sets', 'workout_id']],
   nutrition_plans: [['plan_meals', 'plan_id'], ['nutrition_plans', 'variant_of']], saved_meals: [], coach_notes: [], questionnaires: [], case_reports: [['case_answers', 'report_id']], plan_meals: [['plan_options', 'meal_id']], plan_options: [['plan_items', 'option_id']],
-  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id'], ['tennis_sessions', 'client_id'], ['wellness', 'client_id'], ['tournaments', 'client_id'], ['sweat_tests', 'client_id'], ['fitness_tests', 'client_id'], ['pain_reports', 'client_id'], ['anthropometry', 'client_id'], ['supplement_plans', 'client_id'], ['supplement_logs', 'client_id'], ['cycle_logs', 'client_id'], ['messages', 'client_id'], ['lesson_reads', 'client_id'], ['challenge_members', 'client_id'], ['payments', 'client_id'], ['surveys', 'client_id'], ['push_subscriptions', 'user_id'], ['reminder_prefs', 'user_id'], ['case_reports', 'client_id'], ['case_answers', 'client_id'], ['saved_meals', 'client_id'], ['coach_notes', 'client_id'], ['questionnaires', 'client_id'], ['technique_videos', 'client_id'], ['client_meta', 'client_id'], ['client_prefs', 'client_id'], ['guardian_links', 'client_id']]
+  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id'], ['tennis_sessions', 'client_id'], ['wellness', 'client_id'], ['tournaments', 'client_id'], ['sweat_tests', 'client_id'], ['fitness_tests', 'client_id'], ['pain_reports', 'client_id'], ['anthropometry', 'client_id'], ['supplement_plans', 'client_id'], ['supplement_logs', 'client_id'], ['cycle_logs', 'client_id'], ['messages', 'client_id'], ['lesson_reads', 'client_id'], ['challenge_members', 'client_id'], ['payments', 'client_id'], ['surveys', 'client_id'], ['push_subscriptions', 'user_id'], ['reminder_prefs', 'user_id'], ['case_reports', 'client_id'], ['case_answers', 'client_id'], ['saved_meals', 'client_id'], ['coach_notes', 'client_id'], ['questionnaires', 'client_id'], ['technique_videos', 'client_id'], ['client_meta', 'client_id'], ['client_prefs', 'client_id'], ['guardian_links', 'client_id'], ['training_blocks', 'client_id'], ['weekly_goals', 'client_id'], ['lab_results', 'client_id'], ['appointments', 'client_id'], ['bia_logs', 'client_id'], ['payment_reports', 'client_id'], ['signatures', 'client_id']]
 };
 const RESTRICT = { exercises: [['routine_exercises', 'exercise_id'], ['workout_sets', 'exercise_id']], foods: [['plan_items', 'food_id']] };
 function cascadeDelete(d, table, id) {
@@ -194,6 +197,7 @@ function buildDemoData() {
   if (window.buildComunidadDemo) buildComunidadDemo(d);
   if (window.buildNegocioDemo) buildNegocioDemo(d);
   if (window.buildImportarDemo) buildImportarDemo(d);
+  if (window.buildV10Demo) buildV10Demo(d);
   return d;
 }
 
@@ -264,6 +268,7 @@ async function afterAuth() {
     S.profile = p[0];
     await Promise.all([loadExercises(), loadFoods(), loadSettings()]);
     if (typeof loadTier === 'function') await loadTier();
+    for (const fn of HOOKS.boot) { try { await fn(); } catch (e) { console.warn(e); } }
     S.needsIntake = false; S.intake = null;
     if (S.profile.role === 'client' && !S.needsMigration) {
       S.intake = (await DB.select('intakes', { eq: { client_id: S.profile.id } }))[0] || null;
@@ -315,6 +320,7 @@ function setActiveNav(name) {
   const map = coach
     ? { '': 'asesorados', asesorado: 'asesorados', rutina: 'asesorados', resumen: 'asesorados', diario: 'asesorados', 'plan-nutri': 'asesorados', 'plan-ver': 'asesorados', compras: 'asesorados', ajustes: 'asesorados', informe: 'asesorados', negocio: 'asesorados', retos: 'perfil', ejercicio: 'biblioteca', 'lecciones-admin': 'biblioteca', leccion: 'biblioteca', alimentos: 'biblioteca', alimento: 'biblioteca', videos: 'biblioteca' }
     : { '': 'hoy', semana: 'hoy', competencia: 'hoy', tecnica: 'historial', cuestionario: 'expediente', acudientes: 'perfil', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', fotos: 'historial', rendimiento: 'historial', 'plan-ver': 'hoy', compras: 'hoy', checkin: 'hoy', suplementos: 'hoy', fuera: 'hoy', mensajes: 'hoy', retos: 'hoy', logros: 'historial', lecciones: 'perfil', leccion: 'perfil', valoracion: 'perfil', informe: 'perfil', informes: 'perfil', recordatorios: 'perfil', encuesta: 'hoy' };
+  Object.assign(map, coach ? HOOKS.coachNav : HOOKS.nav);
   const key = map[name] ?? name;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.nav === key));
   const pill = document.getElementById('live-pill');
@@ -357,6 +363,7 @@ async function route() {
       if (name === 'leccion') return await vLeccion(a);
       if (name === 'retos') return await vRetos();
       if (name === 'perfil') return vPerfil();
+      if (HOOKS.coachRoutes[name]) return await HOOKS.coachRoutes[name](a, b, c);
       return await vAsesorados();
     }
     if (S.needsIntake && name !== 'perfil') return vOnboarding();
@@ -391,6 +398,7 @@ async function route() {
     if (name === 'compras') return await vCompras(a, b);
     if (name === 'resumen') return await vResumen(a);
     if (name === 'perfil') return vPerfil();
+    if (HOOKS.routes[name]) return await HOOKS.routes[name](a, b, c);
     return await vHoy(name === 'hoy' ? a : null);
   } catch (e) { console.error(e); paint(`<div class="card"><p>${esc(errMsg(e))}</p><button class="btn" onclick="route()">Reintentar</button></div>`); }
 }
@@ -514,6 +522,7 @@ async function vPlan() {
   let html = '';
   const tp = typeof taperInfo === 'function' ? await taperInfo(cid).catch(() => null) : null;
   if (tp) html += `<div class="warn-box small">${esc(tp.text)}</div>`;
+  for (const hk of HOOKS.planTop) html += await hk.html({ cid, routines, days, rex }).catch(() => '');
   if (draft) html += `<div class="card live"><div><b>Sesión en curso</b><div class="small">${esc(draft.day_name || 'Sesión libre')} · iniciada ${new Date(draft.started_at).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</div></div><a class="btn primary" href="#/entreno">Continuar</a></div>`;
   html += `<div class="stats3"><div><b>${thisWeek.length}</b><small>Sesiones esta semana</small></div><div><b>${fmtKg(thisWeek.reduce((a, w) => a + num(w.total_volume), 0))}</b><small>Volumen semanal</small></div><div><b>${recent.length ? fmtDateShort(recent[0].started_at) : '—'}</b><small>Última sesión</small></div></div>`;
 
@@ -532,7 +541,7 @@ async function vPlan() {
     }
   }
   html += `<button class="btn ghost block" data-act="free">Iniciar sesión libre</button>`;
-  paint(html, { click: { start: el => startWorkout(el.dataset.id), free: () => startWorkout(null) } }, 'Entreno');
+  paint(html, { click: Object.assign({ start: el => startWorkout(el.dataset.id), free: () => startWorkout(null) }, hookHandlers(HOOKS.planTop, { cid, routines, days, rex })) }, 'Entreno');
 }
 
 async function startWorkout(dayId) {
@@ -564,7 +573,7 @@ async function attachPrevious(list) {
     if (!mine.length) { e.prev = []; continue; }
     const wid = mine[0].workout_id;
     if (typeof e1rmOf === 'function') e.best = Math.max(0, ...mine.map(s => e1rmOf(num(s.weight_kg), num(s.reps))));
-    e.prev = mine.filter(s => s.workout_id === wid).sort((a, b) => a.set_number - b.set_number).map(s => ({ w: num(s.weight_kg), r: s.reps }));
+    e.prev = mine.filter(s => s.workout_id === wid).sort((a, b) => a.set_number - b.set_number).map(s => ({ w: num(s.weight_kg), r: s.reps, rir: s.rir }));
   }
 }
 
@@ -592,7 +601,7 @@ function exCard(e, ei) {
   const doneCount = e.sets.filter(s => s.done).length;
   const hint = typeof progressionHint === 'function' ? progressionHint(e) : null;
   return `<div class="card ex-card${doneCount && doneCount === e.sets.length ? ' complete' : ''}${t.group ? ' grp' : ''}">${t.group ? `<div class="grp-l">Superserie ${esc(t.group)}</div>` : ''}
-    <div class="ex-title"><button class="link-title" data-act="info" data-id="${esc(e.exercise_id)}">${esc(ex.name)}</button>${ex.video_url ? `<button class="vid-btn" data-act="info" data-id="${esc(e.exercise_id)}" aria-label="Ver video de la técnica">▶ Técnica</button>` : ''}<span class="tag">${esc(ex.muscle_group)}</span></div>
+    <div class="ex-title"><button class="link-title" data-act="info" data-id="${esc(e.exercise_id)}">${esc(ex.name)}</button>${ex.video_url || ex.video_path ? `<button class="vid-btn" data-act="info" data-id="${esc(e.exercise_id)}" aria-label="Ver video de la técnica">▶ Técnica</button>` : ''}<span class="tag">${esc(ex.muscle_group)}</span></div>
     ${orig ? `<div class="swapped">Sustituye a: ${esc(orig.name)}</div>` : ''}
     ${tline ? `<div class="target">Objetivo: ${esc(tline)}</div>` : ''}
     ${hint ? `<div class="hint${hint.up ? ' up' : ''}">${esc(hint.text)}</div>` : ''}
@@ -717,10 +726,11 @@ function exInfoModal(id) {
   const alts = S.exercises.filter(x => e.family && x.family === e.family && x.id !== e.id);
   modal(`${modalHead(e.name)}
     <div class="chips"><span class="tag">${esc(e.muscle_group)}</span>${e.equipment ? `<span class="tag">${esc(e.equipment)}</span>` : ''}</div>
-    ${e.video_url && typeof videoEmbed === 'function' ? videoEmbed(e.video_url) : ''}
-    ${e.instructions ? `<p class="pre">${esc(e.instructions)}</p>` : (e.video_url ? '' : '<p class="muted small">Sin indicaciones técnicas registradas.</p>')}
+    ${e.video_path && typeof ownVideoSlot === 'function' ? ownVideoSlot(e) : e.video_url && typeof videoEmbed === 'function' ? videoEmbed(e.video_url) : ''}
+    ${e.instructions ? `<p class="pre">${esc(e.instructions)}</p>` : (e.video_url || e.video_path ? '' : '<p class="muted small">Sin indicaciones técnicas registradas.</p>')}
     ${e.video_url ? `<a class="btn block" href="${esc(e.video_url)}" target="_blank" rel="noopener">Abrir el video en otra ventana</a>` : ''}
     ${alts.length ? `<h4>Variantes</h4><ul class="plain">${alts.map(a => `<li>${esc(a.name)} <small class="muted">${esc(a.equipment || '')}</small></li>`).join('')}</ul>` : ''}`);
+  if (e.video_path && typeof loadOwnVideo === 'function') loadOwnVideo(e);
 }
 
 function pickExercise(title, onPick, opts = {}) {
@@ -871,7 +881,7 @@ async function progresoHtml(cid, base, exId) {
     sets.forEach(s => { const b = by[s.exercise_id] = by[s.exercise_id] || { last: s.created_at, ws: new Set(), best: 0 }; b.ws.add(s.workout_id); b.best = Math.max(b.best, e1rm(num(s.weight_kg), s.reps)); });
     const list = Object.entries(by).sort((a, b) => (a[1].last < b[1].last ? 1 : -1));
     if (!list.length) return '<div class="card empty"><p>Cuando registres sesiones, aquí verás la progresión de cada ejercicio y tus récords.</p></div>';
-    return `<input class="input" id="pf" placeholder="Buscar ejercicio">` + list.map(([id, b]) => `<a class="card row-link pf-item" data-n="${esc(norm(exName(id)))}" href="${base}/${id}"><div><b>${esc(exName(id))}</b><small class="muted">${b.ws.size} sesiones · última ${fmtDateShort(b.last)}</small></div><span class="kpi">${b.best ? fmtN(b.best) + ' kg' : '—'}</span></a>`).join('');
+    return (typeof strengthMonthlyHtml === 'function' ? strengthMonthlyHtml(sets) : '') + `<input class="input" id="pf" placeholder="Buscar ejercicio">` + list.map(([id, b]) => `<a class="card row-link pf-item" data-n="${esc(norm(exName(id)))}" href="${base}/${id}"><div><b>${esc(exName(id))}</b><small class="muted">${b.ws.size} sesiones · última ${fmtDateShort(b.last)}</small></div><span class="kpi">${b.best ? fmtN(b.best) + ' kg' : '—'}</span></a>`).join('');
   }
   const sets = await DB.select('workout_sets', { eq: { client_id: cid, exercise_id: exId }, order: 'created_at' });
   const sessions = [];
@@ -935,6 +945,7 @@ function vPerfil() {
       <a class="card row-link" href="#/informes"><div><b>Informes mensuales</b><small class="muted">Tu progreso del mes en PDF y HTML</small></div><span class="chev">›</span></a>
       ${S.needsV9 ? '' : `<a class="card row-link" href="#/tecnica"><div><b>Videos de técnica</b><small class="muted">Envía un video de un ejercicio y recibe correcciones</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/acudientes"><div><b>Acceso para acudientes</b><small class="muted">Enlace de solo lectura para padres o tutores</small></div><span class="chev">›</span></a>`}
+      ${HOOKS.perfilClient.filter(x => !x.show || x.show()).map(x => `<a class="card row-link" href="${x.href}"><div><b>${esc(x.title)}</b><small class="muted">${esc(x.sub)}</small></div><span class="chev">›</span></a>`).join('')}
       <div id="perfil-extra"></div>
       <div class="card"><h3>Mis datos</h3><p class="small muted">Copia de tu información registrada en la aplicación.</p><div class="row-btns">${typeof exportMyData === 'function' ? '<button class="btn sm" data-act="myPdf">PDF</button><button class="btn sm" data-act="myHtml">HTML</button>' : ''}<button class="btn sm" data-act="xlsMe">Excel</button></div></div>
       ${waBtn(S.settings.whatsapp, `Hola, soy ${p.full_name || ''}, asesorado de ${BRAND.name}.`, 'Escribir a mi entrenador por WhatsApp', 'btn block')}`
@@ -942,7 +953,8 @@ function vPerfil() {
       <div id="perfil-extra"></div>
       <a class="card row-link" href="#/ajustes"><div><b>Ajustes de automatización</b><small class="muted">Publicación de planes, cálculos, plantillas, WhatsApp y fotos</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/retos"><div><b>Retos grupales</b><small class="muted">Crear retos de pasos, agua, registro o entrenamiento</small></div><span class="chev">›</span></a>
-      <a class="card row-link" href="#/lecciones-admin"><div><b>Lecciones semanales</b><small class="muted">Contenido educativo para los asesorados</small></div><span class="chev">›</span></a>`}
+      <a class="card row-link" href="#/lecciones-admin"><div><b>Lecciones semanales</b><small class="muted">Contenido educativo para los asesorados</small></div><span class="chev">›</span></a>
+      ${HOOKS.perfilCoach.filter(x => !x.show || x.show()).map(x => `<a class="card row-link" href="${x.href}"><div><b>${esc(x.title)}</b><small class="muted">${esc(x.sub)}</small></div><span class="chev">›</span></a>`).join('')}`}
     ${DEMO ? '<button class="btn block" data-act="reset">Restablecer datos de demostración</button>' : ''}
     <button class="btn danger-outline block" data-act="out">Cerrar sesión</button>
     <p class="small muted center">${esc(BRAND.name)} · ${esc(BRAND.tagline)}</p>`, {
@@ -953,11 +965,12 @@ function vPerfil() {
       ...(typeof lookHandlers === 'object' ? lookHandlers : {}),
       xlsMe: async el => { el.disabled = true; try { await exportClientXlsx(p.id); } finally { el.disabled = false; } },
       ...(typeof referralHandlers === 'object' ? referralHandlers : {}),
+      ...hookHandlers(HOOKS.perfilExtra),
       ...(typeof pushHandlers === 'function' ? pushHandlers(() => route()) : {}),
       reset: () => { if (!confirm('¿Restablecer todos los datos de demostración?')) return; localStorage.removeItem(DEMO_KEY); Object.keys(localStorage).filter(k => /^(ent_draft_|dp_)/.test(k)).forEach(k => localStorage.removeItem(k)); demoData = null; location.reload(); }
     }
   }, 'Perfil');
-  (async () => { const box = document.getElementById('perfil-extra'); if (!box) return; let h = ''; if (client) h += (typeof myMembershipCardHtml === 'function' ? await myMembershipCardHtml().catch(() => '') : '') + (typeof referralCardHtml === 'function' ? referralCardHtml() : '') + (typeof consentCardHtml === 'function' ? await consentCardHtml().catch(() => '') : ''); else if (typeof pushCardHtml === 'function') h += await pushCardHtml(); if (typeof lookCardHtml === 'function') h += lookCardHtml(); box.innerHTML = h; })();
+  (async () => { const box = document.getElementById('perfil-extra'); if (!box) return; let h = ''; if (client) h += (typeof myMembershipCardHtml === 'function' ? await myMembershipCardHtml().catch(() => '') : '') + (typeof referralCardHtml === 'function' ? referralCardHtml() : '') + (typeof consentCardHtml === 'function' ? await consentCardHtml().catch(() => '') : ''); else if (typeof pushCardHtml === 'function') h += await pushCardHtml(); for (const x of HOOKS.perfilExtra.filter(y => !y.show || y.show())) h += await x.html().catch(() => ''); if (typeof lookCardHtml === 'function') h += lookCardHtml(); box.innerHTML = h; })();
 }
 
 /* =====================================================================
@@ -994,6 +1007,7 @@ async function vAsesorados() {
     click: {
       arch: el => { S.showArchived = el.dataset.v === '1'; route(); },
       ...(typeof autoMsgHandlers === 'function' ? autoMsgHandlers() : {}),
+      ...hookHandlers(HOOKS.inboxClick),
       copy: async () => { const url = location.origin + location.pathname; try { await navigator.clipboard.writeText(url); toast('Enlace copiado'); } catch (e) { prompt('Copia este enlace:', url); } },
       ibPhase2: async el => { if (!confirm('¿Generar y publicar la Fase 2 de este asesorado? La Fase 1 quedará inactiva.')) return; el.disabled = true; const id = await generatePhase2(el.dataset.id); toast('Fase 2 publicada'); location.hash = '#/rutina/' + id; }
     }
@@ -1012,18 +1026,20 @@ async function vAsesorado(id, tab, sub) {
     ['Plan', [['nutricion', 'Nutrición'], ['rutinas', 'Entreno'], ['suplementos', 'Suplementos']]],
     ['Seguimiento', [['seguimiento', 'Nutrición y peso'], ['checkins', 'Check-ins'], ['rendimiento', 'Rendimiento'], ['antropometria', 'Antropometría'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios'], ...(S.needsV9 ? [] : [['videos', 'Videos']]), ['fotos', 'Fotos']]],
     ['Mensajes', [['mensajes', 'Mensajes']]]];
+  HOOKS.fichaTabs.filter(x => !x.show || x.show()).forEach(x => { const g = GROUPS.find(y => y[0] === x.group); if (g && !g[1].some(y => y[0] === x.key)) g[1].push([x.key, x.label]); });
   const grp = GROUPS.find(g => g[1].some(x => x[0] === tab)) || GROUPS[1];
   const tabs = `<div class="seg tabs-g">${GROUPS.map(g => `<a class="${g === grp ? 'on' : ''}" href="${base}/${g[1][0][0]}">${g[0]}</a>`).join('')}</div>
     ${grp[1].length > 1 ? `<div class="chips scroll tabs2">${grp[1].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>` : ''}`;
   const head = `<div class="card"><div class="day-h"><p class="small muted">${esc(c.email || '')}${c.phone ? ' · ' + esc(c.phone) : ''}</p>${waBtn(c.phone, `Hola ${firstName(c.full_name)}, `)}</div>
     <label class="field"><span>Objetivo del asesorado</span><textarea class="input" rows="2" data-goal placeholder="Ej.: Tenista juvenil · fuerza y potencia para la temporada">${esc(c.goal || '')}</textarea></label>
     ${isCoach() && typeof nextReviewHtml === 'function' ? await nextReviewHtml(c.id) : ''}
-    ${mh.html}${isCoach() && typeof modulesCardHtml === 'function' ? modulesCardHtml(c.id) : ''}</div>`;
+    ${mh.html}${(await Promise.all(HOOKS.fichaHead.map(x => x.html(c.id).catch(() => '')))).join('')}${isCoach() && typeof modulesCardHtml === 'function' ? modulesCardHtml(c.id) : ''}</div>`;
   let body = '';
-  const handlers = { click: Object.assign({}, mh.click, typeof modulesHandlers === 'function' ? modulesHandlers() : {}), change: async t => { if ('goal' in t.dataset) { await DB.update('profiles', id, { goal: t.value.trim() }); toast('Objetivo guardado'); } } };
+  const handlers = { click: Object.assign({}, mh.click, typeof modulesHandlers === 'function' ? modulesHandlers() : {}), change: async t => { for (const x of HOOKS.fichaHead) if (x.change && await x.change(t)) return; if ('goal' in t.dataset) { await DB.update('profiles', id, { goal: t.value.trim() }); toast('Objetivo guardado'); } } };
 
   let after = null;
   const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab, informes: typeof coachInformesTab === 'function' ? coachInformesTab : null, rendimiento: typeof rendimientoTab === 'function' ? (cid, s) => rendimientoTab(cid, s, base + '/rendimiento') : null, antropometria: typeof antropometriaTab === 'function' ? antropometriaTab : null, suplementos: typeof suplementosTab === 'function' ? suplementosTab : null, mensajes: typeof chatTab === 'function' ? chatTab : null, expediente: typeof expedienteTab === 'function' ? expedienteTab : null, notas: typeof coachNotesTab === 'function' ? coachNotesTab : null, cuestionarios: typeof coachQuestTab === 'function' ? coachQuestTab : null, videos: typeof coachVideosTab === 'function' ? coachVideosTab : null };
+  HOOKS.fichaTabs.forEach(x => { MODS[x.key] = x.fn; });
   if (tab === 'historial') body = await historialHtml(id);
   else if (MODS[tab]) {
     const r = await MODS[tab](id, sub);
@@ -1183,12 +1199,13 @@ function vEjercicio(id) {
       <label class="field"><span>Indicaciones técnicas</span><textarea class="input" name="instructions" rows="4" placeholder="Posición, recorrido, respiración, errores frecuentes…">${esc(e.instructions || '')}</textarea></label>
       <label class="field"><span>Video de la técnica (YouTube, Shorts o Vimeo)</span><input class="input" name="video_url" type="url" value="${esc(e.video_url || '')}" placeholder="https://youtu.be/…"></label>
       ${e.video_url && typeof videoEmbed === 'function' ? videoEmbed(e.video_url) : ''}
+      ${!isNew && !S.needsV10 && typeof ownVideoEditorHtml === 'function' ? ownVideoEditorHtml(e) : ''}
       ${!isNew && e.name ? `<a class="small" href="https://www.youtube.com/results?search_query=${encodeURIComponent('técnica ' + e.name)}" target="_blank" rel="noopener">Buscar videos de «${esc(e.name)}» en YouTube</a>` : ''}
       <button class="btn primary block" type="submit">${isNew ? 'Crear ejercicio' : 'Guardar cambios'}</button>
     </form>
     ${alts.length ? `<div class="card"><h3>Variantes (familia: ${esc(e.family)})</h3><ul class="plain">${alts.map(a => `<li><a href="#/ejercicio/${a.id}">${esc(a.name)}</a> <small class="muted">${esc(a.equipment || '')}</small></li>`).join('')}</ul></div>` : ''}
     ${isNew ? '' : '<button class="btn danger-outline block" data-act="del">Eliminar ejercicio</button>'}`, {
-    click: { del: async () => { if (!confirm('¿Eliminar este ejercicio de la biblioteca?')) return; await DB.remove('exercises', id); await loadExercises(); toast('Ejercicio eliminado'); location.hash = '#/biblioteca'; } }
+    click: Object.assign({ del: async () => { if (!confirm('¿Eliminar este ejercicio de la biblioteca?')) return; await DB.remove('exercises', id); await loadExercises(); toast('Ejercicio eliminado'); location.hash = '#/biblioteca'; } }, typeof ownVideoHandlers === 'function' ? ownVideoHandlers(e) : {})
   }, isNew ? 'Nuevo ejercicio' : 'Editar ejercicio');
   $('#exf').onsubmit = ev => {
     ev.preventDefault();
