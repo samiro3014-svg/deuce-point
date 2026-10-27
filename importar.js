@@ -5,7 +5,7 @@
 const IMP_TYPE = 'deucepoint-plan';
 const nrm = s => String(s ?? '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
 const WD_CANON = Object.fromEntries(WEEKDAYS.map(d => [nrm(d), d]));
-const canonWd = s => WD_CANON[nrm(s)] || null;
+const canonWd = s => { const n = nrm(s).replace(/\.$/, ''); return WD_CANON[n] || (n.length >= 2 ? WEEKDAYS.find(d => nrm(d).startsWith(n.slice(0, 3))) : null) || null; };
 const wdList = a => [...new Set((Array.isArray(a) ? a : String(a || '').split(/\s*(?:,|;|\by\b|\be\b)\s*/)).map(canonWd).filter(Boolean))];
 const pick = (o, ks, d = undefined) => { if (!o || typeof o !== 'object') return d; for (const k of ks) if (o[k] != null && o[k] !== '') return o[k]; return d; };
 const arrOf = v => Array.isArray(v) ? v : v ? [v] : [];
@@ -16,11 +16,13 @@ function isoDate(s) {
   m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
   return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : null;
 }
+const fmtUsd = v => num(v).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const docSafe = s => String(s || '').replace(/[\\/:*?"<>|]/g, '').trim();
 
 /* ---------- lectura del bloque de datos ---------- */
 function parseImportText(text) {
   text = String(text || '');
+  if (hasAnnex(text)) { const r = parseAnnex(text); if (r) return r; }
   const m = text.match(/<script[^>]*id=["']deucepoint-plan["'][^>]*>([\s\S]*?)<\/script>/i) || text.match(/<script[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/i);
   let src = m ? m[1] : text;
   if (!m) { const f = src.match(/```(?:json)?\s*([\s\S]*?)```/); if (f) src = f[1]; }
@@ -31,7 +33,119 @@ function parseImportText(text) {
   if (data.tipo && data.tipo !== IMP_TYPE) throw new Error('El bloque no corresponde al formato de Deuce Point («tipo»: «' + IMP_TYPE + '»).');
   return normalizeImport(data);
 }
+/* ---------- anexo «Datos de carga» del PDF: lectura directa, sin costo de API ---------- */
+const ANX_START = /={2,}\s*DEUCE\s*POINT\s*DATOS\s*={2,}/i, ANX_END = /={2,}\s*FIN\s*={2,}/i;
+const ANX_KEYS = new Set(['ASESORADO', 'FECHA', 'TITULO', 'OBJETIVO', 'RESUMEN', 'INDICADOR', 'ALERTA', 'FAVORABLE', 'PENDIENTE', 'PLAN', 'TIPO', 'COMIDA', 'OPCION', 'FECHA_ESPECIAL', 'ALIMENTO_NUEVO', 'SUPLEMENTO', 'COMPETENCIA', 'RUTINA', 'SESION', 'EJERCICIO', 'MONITOREO', 'LABORATORIO', 'LAB_INDICACIONES', 'SECCION']);
+const hasAnnex = t => ANX_START.test(String(t || ''));
+function annexRecords(text) {
+  text = String(text || ''); const s = text.search(ANX_START); if (s < 0) return null;
+  let body = text.slice(s).replace(ANX_START, ''); const e = body.search(ANX_END); if (e >= 0) body = body.slice(0, e);
+  const recs = [];
+  for (let ln of body.split(/\r?\n/)) {
+    ln = ln.replace(/\s+/g, ' ').trim(); if (!ln || /^(p[aá]gina|pag\.?)\s*\d+(\s*(de|\/)\s*\d+)?$/i.test(ln)) continue;
+    const m = ln.match(/^([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ_ ]{2,20})\s*:\s?(.*)$/);
+    const key = m ? nrm(m[1]).toUpperCase().replace(/ /g, '_') : null;
+    if (key && ANX_KEYS.has(key)) recs.push({ k: key, v: m[2].trim() });
+    else if (/^[-•–]\s/.test(ln)) recs.push({ k: '-', v: ln.replace(/^[-•–]\s+/, '') });
+    else if (recs.length) recs[recs.length - 1].v += ' ' + ln;   // continuación de una línea larga
+  }
+  return recs;
+}
+const anxNum = v => { v = String(v ?? '').trim(); if (/^\d{1,3}(\.\d{3})+$/.test(v)) v = v.replace(/\./g, ''); return num(v); };
+const anxText = v => String(v || '').split(/\s*\/\/\s*/).map(x => x.trim()).filter(Boolean).join('\n');
+/* Convierte el anexo en la misma estructura del bloque JSON */
+function parseAnnex(text) {
+  const recs = annexRecords(text); if (!recs || !recs.length) return null;
+  const d = { tipo: IMP_TYPE, version: 1, indicadores: [], alertas: [], favorables: [], pendientes: [], suplementos: [], competencias: [], monitoreo: [], secciones: [], alimentos_nuevos: {} };
+  const res = []; const labs = { examenes: [], indicaciones: '' };
+  let plan = null, ty = null, meal = null, opt = null, tr = null, ses = null;
+  const P = () => plan || (plan = { nombre: '', agua_ml: 0, indicaciones: '', tipos_de_dia: [], fechas: [] });
+  const T = () => ty || (ty = (P().tipos_de_dia.push({ codigo: '', nombre: '', dias: [], comidas: [] }), plan.tipos_de_dia[plan.tipos_de_dia.length - 1]));
+  for (const { k, v } of recs) {
+    const f = v.split('|').map(x => x.trim()); const rest = i => f.slice(i).filter(Boolean).join(' · ');
+    switch (k) {
+      case 'ASESORADO': d.asesorado = v; break;
+      case 'FECHA': d.fecha = v; break;
+      case 'TITULO': d.titulo = v; break;
+      case 'OBJETIVO': d.objetivo = v; break;
+      case 'RESUMEN': res.push(anxText(v)); break;
+      case 'INDICADOR': d.indicadores.push({ nombre: f[0], valor: f[1], unidad: f[2], referencia: rest(3) }); break;
+      case 'ALERTA': d.alertas.push({ prioridad: f[0], titulo: f[1] || f[0], detalle: anxText(rest(2)) }); break;
+      case 'FAVORABLE': d.favorables.push(...v.split(';').map(x => x.trim()).filter(Boolean)); break;
+      case 'PENDIENTE': d.pendientes.push({ pregunta: f[0], motivo: rest(1) }); break;
+      case 'PLAN': Object.assign(P(), { nombre: f[0], agua_ml: anxNum(f[1]), indicaciones: anxText(rest(2)) }); break;
+      case 'TIPO': ty = { codigo: f[0], nombre: f[1], dias: f[2] || '', kcal: anxNum(f[3]), proteina_g: anxNum(f[4]), carbohidratos_g: anxNum(f[5]), grasa_g: anxNum(f[6]), agua_ml: anxNum(f[7]), indicaciones: anxText(rest(8)), comidas: [] }; P().tipos_de_dia.push(ty); meal = opt = null; break;
+      case 'COMIDA': meal = { hora: f[0], nombre: f[1] || f[0], indicaciones: anxText(rest(2)), opciones: [] }; T().comidas.push(meal); opt = null; break;
+      case 'OPCION': if (!meal) break; opt = { nombre: f[0] || 'Opción ' + (meal.opciones.length + 1), dias: f[1] || '', preparacion: anxText(rest(2)), alimentos: [] }; meal.opciones.push(opt); break;
+      case '-': if (!meal) break; if (!opt) { opt = { nombre: 'Opción 1', alimentos: [] }; meal.opciones.push(opt); } opt.alimentos.push({ alimento: f[0], gramos: anxNum(f[1]), nota: rest(2) }); break;
+      case 'FECHA_ESPECIAL': P().fechas.push({ desde: f[0], hasta: f[1] || f[0], dias: f[2] || '', codigo: f[3] || '', porcentaje_carbohidratos: anxNum(f[4]) || 100, motivo: rest(5) }); break;
+      case 'ALIMENTO_NUEVO': if (f[0]) d.alimentos_nuevos[f[0]] = { kcal: anxNum(f[1]), proteina: anxNum(f[2]), carbohidratos: anxNum(f[3]), grasa: anxNum(f[4]), fibra: anxNum(f[5]), categoria: f[6] || '' }; break;
+      case 'SUPLEMENTO': d.suplementos.push({ nombre: f[0], dosis: f[1], momento: f[2], indicaciones: rest(3) }); break;
+      case 'COMPETENCIA': d.competencias.push({ nombre: f[0], fecha_inicio: f[1], fecha_fin: f[2], ciudad: f[3], notas: anxText(rest(4)) }); break;
+      case 'RUTINA': tr = { nombre: f[0] || 'Rutina', indicaciones: anxText(rest(1)), sesiones: [] }; ses = null; break;
+      case 'SESION': tr = tr || { nombre: 'Rutina', sesiones: [] }; ses = { nombre: f[0], ejercicios: [] }; tr.sesiones.push(ses); break;
+      case 'EJERCICIO': if (!ses) { tr = tr || { nombre: 'Rutina', sesiones: [] }; ses = { nombre: 'Sesión 1', ejercicios: [] }; tr.sesiones.push(ses); } ses.ejercicios.push({ ejercicio: f[0], grupo: f[1], series: anxNum(f[2]), repeticiones: f[3], rir: f[4], descanso_s: anxNum(f[5]), notas: rest(6) }); break;
+      case 'MONITOREO': d.monitoreo.push({ variable: f[0], frecuencia: f[1], criterio: rest(2) }); break;
+      case 'LABORATORIO': labs.examenes.push(...v.split(';').map(x => x.trim()).filter(Boolean)); break;
+      case 'LAB_INDICACIONES': labs.indicaciones = anxText(v); break;
+      case 'SECCION': d.secciones.push({ titulo: f[0], contenido: anxText(rest(1)) }); break;
+    }
+  }
+  if (res.length) d.resumen = res.join('\n\n');
+  if (plan) { if (!plan.nombre) plan.nombre = d.titulo || 'Plan nutricional'; d.plan_nutricional = plan; }
+  if (tr) d.entrenamiento = tr;
+  if (labs.examenes.length || labs.indicaciones) d.laboratorios = labs;
+  return normalizeImport(d);
+}
+
+/* ---------- texto de un PDF (pdf.js en el navegador) ---------- */
+let pdfjsP = null;
+function loadPdfJs() {
+  if (pdfjsP) return pdfjsP;
+  const V = '4.10.38', srcs = [`https://cdn.jsdelivr.net/npm/pdfjs-dist@${V}/build/`, `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${V}/`];
+  pdfjsP = (async () => {
+    for (const b of srcs) { try { const L = await import(b + 'pdf.min.mjs'); L.GlobalWorkerOptions.workerSrc = b + 'pdf.worker.min.mjs'; return L; } catch (e) { console.warn('pdf.js', b, e); } }
+    pdfjsP = null; throw new Error('No se pudo cargar el lector de PDF. Revisa la conexión e inténtalo de nuevo.');
+  })();
+  return pdfjsP;
+}
+async function pdfToText(file) {
+  const L = await loadPdfJs();
+  const pdf = await L.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const out = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const tc = await (await pdf.getPage(p)).getTextContent(); const rows = [];
+    for (const it of tc.items) {
+      if (!it.str) continue; const x = it.transform[4], y = it.transform[5], h = Math.abs(it.transform[3]) || it.height || 10;
+      let r = rows.find(q => Math.abs(q.y - y) < Math.max(1.5, h * 0.45)); if (!r) rows.push(r = { y, its: [] });
+      r.its.push({ x, s: it.str, w: it.width || 0, h });
+    }
+    rows.sort((a, b) => b.y - a.y);
+    for (const r of rows) {
+      r.its.sort((a, b) => a.x - b.x); let s = '', end = null;
+      for (const i of r.its) { if (end != null && i.x - end > i.h * 0.15 && !/\s$/.test(s) && !/^\s/.test(i.s)) s += ' '; s += i.s; end = i.x + i.w; }
+      out.push(s);
+    }
+    out.push('');
+  }
+  return out.join('\n');
+}
+
+/* ---------- conversión con la API (solo si el PDF no trae el anexo) ---------- */
+const API_PRICE = { 'claude-sonnet-5-5': [2, 10], 'claude-opus-5-5': [4, 20], 'claude-haiku-5-5': [1, 5] };
+async function aiConvert(text) {
+  if (DEMO) throw new Error('La conversión con IA requiere la conexión con Supabase (no funciona en modo demostración).');
+  const catalog = S.foods.map(f => f.name).join('; ');
+  const { data, error } = await sb.functions.invoke('convertir-plan', { body: { text: String(text).slice(0, 150000), catalog, spec: ANNEX_SPEC } });
+  if (error) { let m = error.message; try { const j = await error.context.json(); if (j && j.error) m = j.error; } catch (e) { } throw new Error(/not found|404/i.test(m) ? 'La función «convertir-plan» no está publicada en Supabase. Revisa la guía de activación.' : m); }
+  if (!data || !data.text) throw new Error('La IA no devolvió datos.');
+  const md = String(data.model || ''); const pr = /opus/.test(md) ? API_PRICE['claude-opus-5-5'] : /haiku/.test(md) ? API_PRICE['claude-haiku-5-5'] : API_PRICE['claude-sonnet-5-5']; const u = data.usage || {};
+  const usd = (num(u.input_tokens) * pr[0] + num(u.output_tokens) * pr[1]) / 1e6;
+  return { text: data.text, usage: { input: num(u.input_tokens), output: num(u.output_tokens), usd, model: data.model, cut: data.stop === 'max_tokens' } };
+}
+
 function normItem(it) {
+  if (Array.isArray(it)) return { name: String(it[0] || '').trim(), grams: anxNum(it[1]), note: txt(it[2] || ''), per100: null, cat: '' };
   if (typeof it === 'string') { const g = it.match(/(\d+(?:[.,]\d+)?)\s*(?:g|ml)\b/i); return { name: it.replace(/[:\-–]\s*\d.*$/, '').trim(), grams: g ? num(g[1]) : 0, note: '' }; }
   const p = pick(it, ['por_100g', 'macros_100g', 'por100g', 'per_100g']);
   return {
@@ -69,6 +183,12 @@ function normalizeImport(d) {
       types,
       dates: arrOf(pick(P, ['fechas', 'fechas_especiales', 'calendario'], [])).map(x => ({ from: isoDate(pick(x, ['desde', 'fecha', 'inicio'])), to: isoDate(pick(x, ['hasta', 'fin'])) || isoDate(pick(x, ['desde', 'fecha', 'inicio'])), days: wdList(pick(x, ['dias', 'días'], [])), code: String(pick(x, ['codigo', 'código', 'tipo'], '')).trim().toUpperCase(), pct: num(pick(x, ['porcentaje_carbohidratos', 'porcentaje_porciones', 'porcentaje'], 100)) || 100, why: txt(pick(x, ['motivo', 'nota', 'indicacion'], '')) })).filter(x => x.from)
     };
+  }
+  // Composición de alimentos fuera del catálogo, declarada una sola vez
+  const nuevos = pick(d, ['alimentos_nuevos', 'alimentos_fuera_catalogo']);
+  if (plan && nuevos && typeof nuevos === 'object') {
+    const mp = Object.fromEntries(Object.entries(nuevos).map(([k, v]) => [nrm(k), Array.isArray(v) ? { kcal: anxNum(v[0]), protein: anxNum(v[1]), carbs: anxNum(v[2]), fat: anxNum(v[3]), fiber: anxNum(v[4]), cat: v[5] || '' } : { kcal: num(pick(v, ['kcal'])), protein: num(pick(v, ['proteina', 'protein'])), carbs: num(pick(v, ['carbohidratos', 'carbs'])), fat: num(pick(v, ['grasa', 'fat'])), fiber: num(pick(v, ['fibra', 'fiber'], 0)), cat: pick(v, ['categoria'], '') }]));
+    for (const t of plan.types) for (const m of t.meals) for (const o of m.options) for (const it of o.items) { const x = mp[nrm(it.name)]; if (x && !it.per100) { it.per100 = { kcal: x.kcal, protein: x.protein, carbs: x.carbs, fat: x.fat, fiber: x.fiber }; it.cat = it.cat || x.cat; } }
   }
   const tr = pick(d, ['entrenamiento', 'rutina', 'training']);
   const sess = tr ? arrOf(pick(tr, ['sesiones', 'dias', 'días', 'sessions'], [])) : [];
@@ -167,7 +287,7 @@ function importWarnings(st, client) {
 }
 
 /* ---------- vista de importación ---------- */
-function importModal(cid) { S.imp = null; location.hash = '#/importar/' + cid; }
+function importModal(cid) { S.imp = null; S.impAi = null; location.hash = '#/importar/' + cid; }
 async function readFileText(file) { return file.text ? file.text() : new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsText(file); }); }
 async function vImport(cid) {
   if (S.needsV7) return paint(V7_NOTICE);
@@ -179,30 +299,44 @@ async function vImport(cid) {
       <div class="card"><h3>1. Prepara el análisis</h3>
         <p class="small">El paquete reúne la valoración, las preguntas adicionales, las mediciones, el seguimiento y el catálogo de alimentos y ejercicios de la aplicación, junto con las instrucciones de salida. Entrégalo a tu IA o herramienta de análisis.</p>
         <div class="row-btns"><button class="btn primary" data-act="pkg">Descargar paquete (.md)</button><button class="btn" data-act="pkgCopy">Copiar paquete</button><button class="btn" data-act="guide">Instrucciones para tu IA</button></div></div>
-      <div class="card"><h3>2. Carga la respuesta</h3>
-        <p class="small">Archivo HTML que contiene el bloque «deucepoint-plan», archivo JSON, o el texto pegado. El documento HTML también queda guardado en el expediente.</p>
-        <label class="field"><span>Archivo de datos (.html o .json)</span><input class="input" type="file" id="imp-f" accept=".json,.html,.htm,.txt,.md,application/json,text/html"></label>
-        <label class="field"><span>O pega el bloque de datos</span><textarea class="input code" id="imp-t" rows="7" placeholder='{ "tipo": "deucepoint-plan", "version": 1, … }'></textarea></label>
-        <label class="field"><span>Documento completo para el expediente (PDF o HTML, opcional)</span><input class="input" type="file" id="imp-doc" accept=".pdf,.html,.htm,application/pdf,text/html"></label>
+      <div class="card"><h3>2. Carga el informe</h3>
+        <p class="small">PDF del informe con el anexo «Datos de carga» en la última página: la aplicación lo lee directamente, sin costo. También acepta el HTML con el bloque «deucepoint-plan», un JSON o el texto pegado. El PDF o el HTML queda guardado en el expediente.</p>
+        <label class="field"><span>Informe (.pdf, .html o .json)</span><input class="input" type="file" id="imp-f" accept=".pdf,.json,.html,.htm,.txt,.md,application/pdf,application/json,text/html"></label>
+        <label class="field"><span>O pega el anexo o el bloque de datos</span><textarea class="input code" id="imp-t" rows="6" placeholder="=== DEUCE POINT DATOS ===&#10;ASESORADO: …&#10;=== FIN ==="></textarea></label>
+        <label class="field"><span>Documento para el expediente (opcional, si el informe va en otro archivo)</span><input class="input" type="file" id="imp-doc" accept=".pdf,.html,.htm,application/pdf,text/html"></label>
         <button class="btn primary block" data-act="parse">Analizar</button></div>
+      ${S.impAi && S.impAi.cid === cid ? `<div class="card warn-box"><h3>El documento no tiene el anexo «Datos de carga»</h3>
+        <p class="small">La IA puede leer el informe completo y generar el anexo. Texto del documento: ${fmtInt(S.impAi.text.length)} caracteres (≈ ${fmtInt(S.impAi.text.length / 3.2)} tokens de entrada). Costo estimado con Sonnet: ${fmtUsd(S.impAi.text.length / 3.2 * 2 / 1e6 + 6000 * 10 / 1e6)} a ${fmtUsd(S.impAi.text.length / 3.2 * 2 / 1e6 + 12000 * 10 / 1e6)} USD. Con el anexo en el PDF la carga no tiene costo.</p>
+        <div class="row-btns"><button class="btn primary" data-act="aiGo">Convertir con IA</button><button class="btn" data-act="aiNo">Cancelar</button></div><p id="ai-prog" class="small muted"></p></div>` : ''}
       <p class="small muted">Nada se guarda hasta que revises la vista previa y elijas «Aplicar».</p>`, {
       click: {
         pkg: async el => { el.disabled = true; try { const t = await analysisPackage(cid); downloadFile(docSafe(`Paquete de análisis - ${client.full_name}`) + '.md', t, 'text/markdown'); } finally { el.disabled = false; } },
         pkgCopy: async el => { el.disabled = true; try { await copyText(await analysisPackage(cid)); toast('Paquete copiado'); } finally { el.disabled = false; } },
-        guide: () => downloadFile('Instrucciones IA - Deuce Point.md', aiGuideFile(), 'text/markdown'),
+        guide: () => downloadFile('Formato del informe - Deuce Point.md', aiGuideFile(), 'text/markdown'),
+        aiNo: () => { S.impAi = null; vImport(cid); },
+        aiGo: async el => {
+          const p = S.impAi; el.disabled = true; const t0 = Date.now(); const tick = setInterval(() => { const x = $('#ai-prog'); if (x) x.textContent = `Convirtiendo… ${Math.round((Date.now() - t0) / 1000)} s (suele tardar entre 30 y 90 s)`; }, 1000);
+          try {
+            const r = await aiConvert(p.text);
+            const data = parseImportText(r.text);
+            const st = buildImportState(cid, data); st.doc = p.doc; st.ai = r.usage; S.impAi = null; S.imp = st; vImport(cid);
+          } catch (e) { toast(e.message, 'error'); el.disabled = false; } finally { clearInterval(tick); }
+        },
         parse: async el => {
           const f = $('#imp-f').files[0], dfile = $('#imp-doc').files[0]; let text = $('#imp-t').value;
-          el.disabled = true;
+          el.disabled = true; el.textContent = 'Leyendo…';
           try {
-            if (f) text = await readFileText(f);
-            if (!text.trim()) throw new Error('Carga un archivo o pega el bloque de datos.');
+            const isPdf = f && (/pdf$/i.test(f.type) || /\.pdf$/i.test(f.name));
+            if (f) text = isPdf ? await pdfToText(f) : await readFileText(f);
+            if (!text.trim()) throw new Error(isPdf ? 'El PDF no tiene texto seleccionable (puede ser una imagen escaneada). Pide a la IA el PDF generado como documento.' : 'Carga un archivo o pega el anexo.');
+            const doc = dfile ? { type: /pdf$/i.test(dfile.type) || /\.pdf$/i.test(dfile.name) ? 'pdf' : 'html', name: dfile.name, file: dfile } : isPdf ? { type: 'pdf', name: f.name, file: f } : f && /html?$/i.test(f.name) ? { type: 'html', name: f.name, text } : null;
+            const structured = hasAnnex(text) || /deucepoint-plan/.test(text) || (f && /\.json$/i.test(f.name)) || /^\s*[{`]/.test(text);
+            if (!structured) { S.impAi = { cid, text, doc }; S.imp = null; return vImport(cid); }
             const data = parseImportText(text);
             const st = buildImportState(cid, data);
-            if (dfile) st.doc = { type: /pdf$/i.test(dfile.type) || /\.pdf$/i.test(dfile.name) ? 'pdf' : 'html', name: dfile.name, file: dfile };
-            else if (f && /html?$/i.test(f.name)) st.doc = { type: 'html', name: f.name, text };
-            else if (data.html) st.doc = { type: 'html', name: docSafe(data.title) + '.html', text: data.html };
-            S.imp = st; vImport(cid);
-          } catch (e) { toast(e.message, 'error'); el.disabled = false; }
+            st.doc = doc || (data.html ? { type: 'html', name: docSafe(data.title) + '.html', text: data.html } : null);
+            S.impAi = null; S.imp = st; vImport(cid);
+          } catch (e) { toast(e.message, 'error'); el.disabled = false; el.textContent = 'Analizar'; }
         }
       }
     }, 'Importar plan');
@@ -216,6 +350,7 @@ async function vImport(cid) {
     <div class="card"><h3>${esc(d.title)}</h3><p class="small muted">${esc(d.client || client.full_name || '')} · ${esc(fmtDateLong(d.date))}</p>
       <div class="imp-sum"><div><b>${P ? P.types.length : 0}</b><small>Tipos de día</small></div><div><b>${P ? P.types.reduce((a, t) => a + t.meals.length, 0) : 0}</b><small>Comidas</small></div><div><b>${fl.length}</b><small>Alimentos</small></div>
         <div><b>${d.alerts.length}</b><small>Alertas</small></div><div><b>${d.pending.length}</b><small>Preguntas</small></div><div><b>${d.supplements.length + d.competitions.length}</b><small>Suplementos y eventos</small></div></div></div>
+    ${st.ai ? `<p class="small muted">Convertido con IA (${esc(st.ai.model || '')}): ${fmtInt(st.ai.input)} tokens de entrada y ${fmtInt(st.ai.output)} de salida · ${fmtUsd(st.ai.usd)} USD.${st.ai.cut ? ' <b>La respuesta se cortó por longitud: revisa que estén todos los tipos de día y comidas.</b>' : ''}</p>` : ''}
     ${warns.length ? `<div class="warn-box small"><b>Revisar antes de aplicar</b><ul>${warns.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}`;
   if (P && P.types.length) {
     h += `<div class="card"><h3>Tipos de día</h3><table class="tbl"><thead><tr><th>Tipo</th><th>Días</th><th>Meta</th><th>Menú</th></tr></thead><tbody>${P.types.map(t => { const tt = typeTotals(st, t); const dv = t.kcal && tt.kcal ? Math.round((tt.kcal - t.kcal) / t.kcal * 100) : null; return `<tr><td><b>${esc(t.code || '—')}</b>${t.name ? '<br><small class="muted">' + esc(t.name) + '</small>' : ''}</td><td class="small">${esc(t.days.map(x => x.slice(0, 3)).join(', ') || '—')}</td><td class="small">${fmtInt(t.kcal)} kcal<br>P ${fmtInt(t.p)} · C ${fmtInt(t.c)} · G ${fmtInt(t.f)}</td><td class="small">${fmtInt(tt.kcal)} kcal${dv != null ? ` (${dv > 0 ? '+' : ''}${dv} %)` : ''}<br>P ${fmtInt(tt.protein)} · C ${fmtInt(tt.carbs)} · G ${fmtInt(tt.fat)}</td></tr>`; }).join('')}</tbody></table>
@@ -509,104 +644,109 @@ async function inboxCaseRows(byId) {
 /* =====================================================================
    Paquete de análisis e instrucciones para la IA
    ===================================================================== */
-const AI_GUIDE = `# Instrucciones de salida para Deuce Point
+const ANNEX_SPEC = `## Anexo «Datos de carga» (última página del PDF)
 
-Eres el asistente de análisis de ${'${BRAND}'}. Con los datos del asesorado elaboras la valoración y el plan individual. Entrega SIEMPRE dos resultados:
+La aplicación lee solo este anexo para llenar el perfil del asesorado. Si el anexo cumple el formato, la carga es inmediata y no consume la API.
 
-1. **Documento completo** (HTML imprimible a PDF) con el formato habitual: resumen, detector de problemas, datos pendientes, requerimientos por tipo de día, plan de alimentación, monitoreo, laboratorios, suplementación y referencias.
-2. **Bloque de datos** para cargar en la aplicación, dentro del mismo HTML, antes de \`</body>\`:
+### Formato
+- Texto plano en una sola columna, sin tablas ni viñetas gráficas. Letra de 8 a 9 pt; monoespaciada si es posible.
+- Primera línea: \`=== DEUCE POINT DATOS ===\`. Última línea: \`=== FIN ===\`.
+- Un registro por línea. Cada línea empieza con una etiqueta en mayúsculas seguida de dos puntos, o con «- » para los alimentos.
+- Campos separados por « | ». Un campo que no aplica se deja vacío entre barras. No usar « | » dentro de un texto.
+- Números sin separador de miles (3106); decimales con coma o punto (3,3). Fechas AAAA-MM-DD.
+- Días de la semana completos y separados por coma: Lunes, Martes, Miércoles, Jueves, Viernes, Sábado, Domingo.
+- Salto de línea dentro de un texto (pasos de preparación, protocolos): « // ».
 
-\`\`\`html
-<script type="application/json" id="deucepoint-plan">{ …JSON… }</script>
+### Etiquetas, en este orden
+\`\`\`
+ASESORADO: nombre
+FECHA: AAAA-MM-DD
+TITULO: título del informe
+OBJETIVO: objetivo en una línea (se copia al perfil)
+RESUMEN: un párrafo por cada línea RESUMEN
+INDICADOR: nombre | valor | unidad | referencia
+ALERTA: Alta, Media o Baja | título | hallazgo y acción
+FAVORABLE: factor; factor; factor
+PENDIENTE: pregunta para el asesorado | motivo
+PLAN: nombre del plan | agua base ml | indicaciones generales
+TIPO: código | nombre | días | kcal | proteína g | carbohidratos g | grasa g | agua ml | indicaciones del tipo de día
+COMIDA: hora | nombre | indicaciones
+OPCION: nombre | días (solo si es rotación) | preparación (pasos separados por //)
+- alimento | gramos | nota
+FECHA_ESPECIAL: desde | hasta | días (opcional) | código de tipo (vacío = según el día) | % de las porciones de carbohidratos (vacío = 100) | motivo
+ALIMENTO_NUEVO: nombre | kcal | proteína | carbohidratos | grasa | fibra | categoría
+SUPLEMENTO: nombre | dosis | momento | indicaciones
+COMPETENCIA: nombre | fecha inicio | fecha fin | ciudad | notas
+RUTINA: nombre | indicaciones
+SESION: nombre de la sesión
+EJERCICIO: nombre | grupo muscular | series | repeticiones | RIR | descanso en s | notas
+MONITOREO: variable | frecuencia | criterio
+LABORATORIO: examen; examen; examen
+LAB_INDICACIONES: texto
+SECCION: título | texto
 \`\`\`
 
-Si no generas HTML, entrega el JSON solo, en un bloque de código \`json\`.
+### Reglas de contenido
+- Cada COMIDA pertenece al último TIPO, cada OPCION a la última COMIDA y cada «- alimento» a la última OPCION. Si la comida tiene una sola opción, OPCION se puede omitir.
+- Cada TIPO lleva todas sus comidas, aunque se repitan en otro tipo.
+- Gramos del alimento en el estado del nombre (cocido o crudo). Líquidos: gramos = ml. Huevo: 50 g por unidad (anotar las unidades en la nota).
+- Rotaciones (por ejemplo, la proteína de la cena según el día): una OPCION por rotación con sus días. Variaciones (con o sin whey): una OPCION por variación; la primera es la recomendada.
+- Nombres de alimentos: los del catálogo de la aplicación cuando exista equivalente. Los que no estén: una línea ALIMENTO_NUEVO con la composición por 100 g y la categoría (Proteínas, Lácteos, Cereales y tubérculos, Leguminosas, Frutas, Verduras, Grasas, Suplementos, Bebidas, Dulces y otros).
+- FECHA_ESPECIAL: taper, carga de carbohidratos, competencia o progresión (por ejemplo 80 % de las porciones de carbohidratos la primera semana).
+- SECCION: lo que no tiene etiqueta propia (protocolo de competencia, taper, preparación en lote, mercado y costo, hidratación).
+- RUTINA, SESION y EJERCICIO solo si el plan define el entrenamiento.
+- Sin datos de contacto.
 
-## Reglas del bloque de datos
-
-- JSON válido, sin comentarios ni comas finales. Números como números (3106, no "3.106").
-- Fechas en formato AAAA-MM-DD. Días de la semana: Lunes, Martes, Miércoles, Jueves, Viernes, Sábado, Domingo.
-- Cada tipo de día lleva código (A, B, C…), días de la semana, metas (kcal, proteína, carbohidratos y grasa en gramos) y sus comidas completas. Si una comida es igual en varios tipos, repítela en cada uno.
-- Cada alimento lleva **gramos** del alimento en el estado del nombre (cocido, crudo). Para líquidos, gramos = mililitros. Los huevos en gramos (1 unidad ≈ 50 g).
-- Usa el **nombre exacto** del catálogo de alimentos de la aplicación cuando exista un equivalente. Si el alimento no está en el catálogo, agrega "por_100g" con kcal, proteina, carbohidratos, grasa y fibra por 100 g, y "categoria" (una de: Proteínas, Lácteos, Cereales y tubérculos, Leguminosas, Frutas, Verduras, Grasas, Suplementos, Bebidas, Dulces y otros).
-- Opciones de una comida: cada opción es un menú completo e intercambiable. Para rotaciones por día de la semana (por ejemplo, la proteína de la cena), crea una opción por rotación con "dias".
-- Variaciones (por ejemplo, pre-sueño con o sin whey): una opción por variación; la primera es la recomendada.
-- "fechas": periodos en los que cambia el tipo de día (taper, carga de carbohidratos, competencia) o el porcentaje de las porciones de carbohidratos (progresión: "porcentaje_carbohidratos": 80). Si el cambio aplica solo a ciertos días de la semana dentro del periodo, usa "dias".
-- "pendientes": preguntas que el asesorado debe responder; la aplicación se las muestra y te devuelve las respuestas en el siguiente paquete.
-- "alertas": prioridad Alta, Media o Baja.
-- Lo que no tenga campo propio (protocolo de competencia, taper, preparación en lote, mercado y costos, hidratación) va en "secciones" como texto.
-- No incluyas datos de contacto.
-
-## Estructura
-
-\`\`\`json
-{
-  "tipo": "deucepoint-plan",
-  "version": 1,
-  "asesorado": "Nombre",
-  "titulo": "Informe de valoración y plan integral",
-  "fecha": "2026-10-24",
-  "objetivo": "Texto corto para el perfil",
-  "resumen": "Resumen ejecutivo. Párrafos separados por una línea en blanco.",
-  "indicadores": [{ "nombre": "Disponibilidad energética", "valor": "48,6", "unidad": "kcal/kg MLG", "referencia": "≥ 45 óptima; < 30 riesgo" }],
-  "alertas": [{ "prioridad": "Alta", "titulo": "Baja disponibilidad energética", "detalle": "Hallazgo, consecuencia y acción." }],
-  "favorables": ["Ciclo regular"],
-  "pendientes": [{ "pregunta": "¿Puede acostarse a las 21:15?", "motivo": "Llegar a ≥ 7 h de sueño" }],
-  "plan_nutricional": {
-    "nombre": "Plan HYROX · noviembre",
-    "indicaciones": "Indicaciones generales del plan.",
-    "agua_ml": 3000,
-    "tipos_de_dia": [
-      {
-        "codigo": "A", "nombre": "Estaciones", "dias": ["Martes", "Jueves"],
-        "kcal": 3106, "proteina_g": 128, "carbohidratos_g": 503, "grasa_g": 66, "agua_ml": 3500,
-        "indicaciones": "Indicaciones propias de este tipo de día.",
-        "comidas": [
-          {
-            "nombre": "Desayuno", "hora": "04:45", "indicaciones": "",
-            "opciones": [
-              {
-                "nombre": "Opción 1",
-                "preparacion": "Paso 1\\nPaso 2",
-                "alimentos": [
-                  { "alimento": "Huevo entero", "gramos": 150, "nota": "3 unidades" },
-                  { "alimento": "Arepa de maíz", "gramos": 120 },
-                  { "alimento": "Verduras surtidas cocidas", "gramos": 150, "por_100g": { "kcal": 30, "proteina": 1.5, "carbohidratos": 6, "grasa": 0.2, "fibra": 2.5 }, "categoria": "Verduras" }
-                ]
-              }
-            ]
-          },
-          {
-            "nombre": "Cena", "hora": "17:30",
-            "opciones": [
-              { "nombre": "Pollo", "dias": ["Lunes", "Miércoles", "Sábado"], "alimentos": [{ "alimento": "Pechuga de pollo cocida", "gramos": 100 }] },
-              { "nombre": "Lenteja y huevo", "dias": ["Martes", "Viernes"], "alimentos": [{ "alimento": "Lenteja cocida", "gramos": 150 }, { "alimento": "Huevo entero", "gramos": 50 }] }
-            ]
-          }
-        ]
-      }
-    ],
-    "fechas": [
-      { "desde": "2026-10-26", "hasta": "2026-11-01", "porcentaje_carbohidratos": 80, "motivo": "Progresión" },
-      { "desde": "2026-11-16", "hasta": "2026-11-22", "dias": ["Martes", "Jueves"], "codigo": "B", "motivo": "Taper" },
-      { "desde": "2026-11-25", "hasta": "2026-11-26", "codigo": "A", "motivo": "Carga de carbohidratos" }
-    ]
-  },
-  "suplementos": [{ "nombre": "Creatina monohidratada", "dosis": "5 g/día", "momento": "Con el desayuno", "indicaciones": "Todos los días" }],
-  "competencias": [{ "nombre": "HYROX", "fecha_inicio": "2026-11-27", "ciudad": "Bogotá", "notas": "Protocolo en secciones" }],
-  "entrenamiento": {
-    "nombre": "Bloque de fuerza",
-    "indicaciones": "",
-    "sesiones": [{ "nombre": "Día 1 · Pierna", "ejercicios": [{ "ejercicio": "Sentadilla trasera con barra", "grupo": "Cuádriceps", "series": 4, "repeticiones": "6-8", "rir": "2", "descanso_s": 150, "notas": "" }] }]
-  },
-  "monitoreo": [{ "variable": "Peso en ayunas", "frecuencia": "Diario", "criterio": "Si baja de peso: +150 kcal en días A y B" }],
-  "laboratorios": { "examenes": ["Ferritina", "25-OH vitamina D"], "indicaciones": "En ayunas, sin entrenamiento intenso en las 24 h previas." },
-  "secciones": [{ "titulo": "Protocolo el día de la competencia", "contenido": "3–4 h antes: …" }]
-}
+### Ejemplo
 \`\`\`
-
-"entrenamiento" es opcional: inclúyelo solo cuando el plan defina la rutina. Usa los nombres del catálogo de ejercicios cuando existan.
+=== DEUCE POINT DATOS ===
+ASESORADO: Nombre
+FECHA: 2026-10-24
+TITULO: Informe de valoración y plan integral
+OBJETIVO: Competencia 27-11: corregir la disponibilidad energética y llegar con glucógeno completo
+RESUMEN: Entrena de lunes a sábado (11–12 h/semana) e ingiere 1.300–1.500 kcal/día.
+INDICADOR: Disponibilidad energética actual | 9,0 | kcal/kg MLG | < 30 riesgo; ≥ 45 óptima
+ALERTA: Alta | Baja disponibilidad energética | Ingesta de 1.350 kcal frente a un gasto de 3.000 kcal. Aumentar a 2.800–3.100 kcal.
+FAVORABLE: Ciclo regular; prepara sus comidas; creatina 5 g/día
+PENDIENTE: Hora de salida de la competencia | Horario de comidas del día de la competencia
+PLAN: Plan competencia · noviembre | 3000 | Porciones en gramos de alimento cocido, excepto avena cruda.
+TIPO: A | Doble sesión | Martes, Jueves | 3106 | 128 | 503 | 66 | 4000 | Bebida de panela durante la sesión.
+COMIDA: 04:45 | Desayuno | Huevos con 5 ml de aceite.
+- Huevo entero | 150 | 3 unidades
+- Arepa de maíz | 120 |
+- Banano | 120 |
+COMIDA: 17:30 | Cena | Proteína según el día.
+OPCION: Lenteja y huevo | Martes | Lenteja sin remojo // 25 min de cocción
+- Lenteja cocida | 150 |
+- Huevo entero | 50 | 1 unidad
+- Arroz blanco cocido | 150 |
+OPCION: Hígado | Jueves |
+- Hígado de res cocido | 100 |
+- Arroz blanco cocido | 150 |
+TIPO: C | Descanso | Domingo | 2302 | 127 | 293 | 69 | 2500 |
+COMIDA: 06:30 | Desayuno |
+- Huevo entero | 150 | 3 unidades
+- Leche semidescremada | 200 |
+FECHA_ESPECIAL: 2026-10-26 | 2026-11-01 | | | 80 | Progresión
+FECHA_ESPECIAL: 2026-11-16 | 2026-11-22 | Martes, Jueves | B | | Taper
+ALIMENTO_NUEVO: Leche semidescremada | 46 | 3,3 | 4,8 | 1,5 | 0 | Lácteos
+SUPLEMENTO: Creatina monohidratada | 5 g/día | Diario | Incluida la semana de competencia
+COMPETENCIA: HYROX | 2026-11-27 | | Bogotá |
+MONITOREO: Peso en ayunas | Diario | Si baja de peso: +150 kcal en días A y B
+LABORATORIO: Ferritina; 25-OH vitamina D; TSH
+LAB_INDICACIONES: En ayunas, sin entrenamiento intenso en las 24 h previas.
+SECCION: Protocolo el día de la competencia | 3–4 h antes: 120 g de arepa + 2 huevos + 1 banano // 60 min antes: cafeína 3 mg/kg
+=== FIN ===
+\`\`\`
 `;
+const AI_GUIDE = `# Formato del informe para Deuce Point
+
+Instrucción permanente para la IA de análisis de ${'${BRAND}'}. Cada informe se entrega en PDF con dos partes:
+
+1. **Informe para el asesorado:** el formato habitual (resumen, detector de problemas, datos pendientes, requerimientos por tipo de día, plan de alimentación por comida con gramos, reemplazos, monitoreo, laboratorios, suplementación y referencias). Redacción técnica y directa. Gráficas de barras.
+2. **Anexo «Datos de carga»:** la última página, con el formato exacto que se describe abajo. Es lo que la aplicación lee para llenar el perfil (plan por tipo de día, expediente, preguntas, suplementos, competencias y rutina).
+
+` + ANNEX_SPEC;
 const aiGuide = () => AI_GUIDE.replace('${BRAND}', BRAND.name);
 function catalogMd(withEx) {
   let t = `## Catálogo de alimentos de la aplicación (valores por 100 g)\n\n| Alimento | Categoría | kcal | Proteína | Carbohidratos | Grasa |\n|---|---|---|---|---|---|\n`;

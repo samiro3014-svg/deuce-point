@@ -22,6 +22,17 @@ Dirección: https://samiro3014-svg.github.io/deuce-point/
 3. **Importar plan:** carga el HTML o el JSON y, si quieres, el PDF del informe. La vista previa muestra los tipos de día con la meta y lo que suma el menú, los alimentos emparejados con la base (✓ igual, ≈ aproximado, + nuevo, ✗ sin equivalente) y las advertencias. Elige qué aplicar: plan nutricional, expediente, preguntas pendientes, suplementos, competencias, rutina, objetivo del perfil y mensaje al asesorado.
 4. Las equivalencias de alimentos que corrijas se recuerdan para las siguientes importaciones.
 
+### Carga desde el PDF (anexo «Datos de carga»)
+- El informe en PDF lleva en la última página un anexo de texto con formato fijo (`=== DEUCE POINT DATOS ===` … `=== FIN ===`). La app lo lee directamente: carga inmediata y sin costo.
+- La especificación completa está en **Expediente › Instrucciones IA** (archivo «Formato del informe - Deuce Point.md»), con el catálogo de alimentos y ejercicios. Se carga una sola vez como instrucción permanente en la IA de análisis.
+- Si el PDF no trae el anexo, la app ofrece **Convertir con IA** (API de Anthropic, ≈ 0,05–0,15 USD por documento con Sonnet). Requiere activar la función `convertir-plan`.
+
+### Activar la conversión con IA (opcional)
+1. **console.anthropic.com:** crear la cuenta, cargar créditos en *Billing* y crear una llave en *API Keys*. Recomendado: definir un límite de gasto mensual en *Limits*.
+2. **Supabase › Edge Functions › Secrets:** agregar `ANTHROPIC_API_KEY` con la llave. Opcional: `ANTHROPIC_MODEL` (por defecto `claude-sonnet-5-5`).
+3. **Supabase › Edge Functions › Deploy a new function › Via Editor:** nombre `convertir-plan`; pegar el contenido de `supabase/functions/convertir-plan/index.ts`; **Deploy** (dejar activada la verificación de JWT).
+4. La llave queda solo en Supabase. La función solo responde a la cuenta del entrenador.
+
 ### Expediente del asesorado
 - Resumen, indicadores, prioridades (alta, media, baja), factores favorables, monitoreo, laboratorios, suplementación, secciones libres (protocolo de competencia, taper, preparación en lote, mercado) y el documento original (PDF o HTML) en almacenamiento privado.
 - El asesorado lo ve en **Perfil › Mi plan integral** cuando está marcado como visible, responde las preguntas pendientes y el entrenador recibe las respuestas en la bandeja.
