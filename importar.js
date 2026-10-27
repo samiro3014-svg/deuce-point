@@ -289,6 +289,13 @@ function importWarnings(st, client) {
 }
 
 /* ---------- vista de importación ---------- */
+/* Ajusta lo que se aplica y lo que ve el asesorado según su nivel de servicio */
+async function applyTier(st) {
+  st.tier = await tierOf(st.cid); st.hidden = new Set(tierHidden(st.tier, st.data));
+  if (st.tier === 'nutricion') st.opts.train = false;
+  if (st.tier === 'entrenamiento') { st.opts.plan = false; st.opts.supp = false; }
+  return st;
+}
 function importModal(cid) { S.imp = null; S.impAi = null; location.hash = '#/importar/' + cid; }
 async function readFileText(file) { return file.text ? file.text() : new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error); fr.readAsText(file); }); }
 async function vImport(cid) {
@@ -321,7 +328,7 @@ async function vImport(cid) {
           try {
             const r = await aiConvert(p.text);
             const data = parseImportText(r.text);
-            const st = buildImportState(cid, data); st.doc = p.doc; st.ai = r.usage; S.impAi = null; S.imp = st; vImport(cid);
+            const st = buildImportState(cid, data); st.doc = p.doc; st.ai = r.usage; await applyTier(st); S.impAi = null; S.imp = st; vImport(cid);
           } catch (e) { toast(e.message, 'error'); el.disabled = false; } finally { clearInterval(tick); }
         },
         parse: async el => {
@@ -337,7 +344,7 @@ async function vImport(cid) {
             const data = parseImportText(text);
             const st = buildImportState(cid, data);
             st.doc = doc || (data.html ? { type: 'html', name: docSafe(data.title) + '.html', text: data.html } : null);
-            S.impAi = null; S.imp = st; vImport(cid);
+            await applyTier(st); S.impAi = null; S.imp = st; vImport(cid);
           } catch (e) { toast(e.message, 'error'); el.disabled = false; el.textContent = 'Analizar'; }
         }
       }
@@ -372,6 +379,8 @@ async function vImport(cid) {
       ${d.supplements.length ? chk('supp', `Protocolo de suplementos (${d.supplements.length}); reemplaza el actual`, S.needsV6) : ''}
       ${d.competitions.length ? chk('comp', `Competencias (${d.competitions.length}) en Rendimiento › Torneos`, S.needsV6) : ''}
       ${d.training ? chk('train', `Rutina «${esc(d.training.name)}» con ${d.training.sessions.length} sesiones; se activa`) : ''}
+      ${o.kase ? `<div class="field"><span>Lo que verá el asesorado${st.tier && st.tier !== 'completo' ? ` · asesoría de ${esc(TIERS[st.tier].toLowerCase())}: se ocultaron por defecto las secciones que no corresponden` : ''}</span>${caseBlocks(d, o.ask ? d.pending : [], !!st.doc).map(([k, l]) => `<label class="check sub"><input type="checkbox" data-hv="${k}" ${st.hidden && st.hidden.has(k) ? '' : 'checked'}> ${esc(l)}</label>`).join('')}</div>` : ''}
+      ${st.tier === 'nutricion' && d.training ? '<p class="small muted">Asesoría de solo nutrición: la rutina no se crea por defecto.</p>' : ''}${st.tier === 'entrenamiento' && P ? '<p class="small muted">Asesoría de solo entrenamiento: el plan nutricional y los suplementos no se aplican por defecto.</p>' : ''}
       ${d.goal ? chk('goal', `Objetivo del perfil: «${esc(d.goal.slice(0, 90))}»`) : ''}
       ${S.needsV6 ? '' : chk('msg', 'Enviar un mensaje al asesorado avisando del plan nuevo')}
       <p class="small"><b>Documento:</b> ${st.doc ? esc(st.doc.name) + ` (${st.doc.type.toUpperCase()})` : 'sin documento adjunto'} <label class="linkbtn">${st.doc ? 'Cambiar' : 'Adjuntar'}<input type="file" id="imp-doc2" accept=".pdf,.html,.htm,application/pdf,text/html" hidden></label></p>
@@ -380,6 +389,7 @@ async function vImport(cid) {
   paint(h, {
     change: async t => {
       if (t.dataset.o) { o[t.dataset.o] = t.checked; return keepScroll(() => vImport(cid)); }
+      if (t.dataset.hv) { st.hidden = st.hidden || new Set(); if (t.checked) st.hidden.delete(t.dataset.hv); else st.hidden.add(t.dataset.hv); return; }
       if (t.id === 'imp-doc2' && t.files[0]) { const f = t.files[0]; st.doc = { type: /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name) ? 'pdf' : 'html', name: f.name, file: f }; keepScroll(() => vImport(cid)); }
     },
     click: {
@@ -463,7 +473,7 @@ async function applyImport(st, client, prog) {
     prog('Expediente…');
     const [rep] = await DB.insert('case_reports', {
       client_id: cid, title: d.title, report_date: d.date, summary: d.summary || null, visible: !!o.visible, plan_id: out.planId,
-      pending: o.ask ? d.pending : [], data: { indicators: d.indicators, alerts: d.alerts, favorables: d.favorables, monitoring: d.monitoring, labs: d.labs, sections: d.sections, supplements: d.supplements, competitions: d.competitions, goal: d.goal, plan_name: d.plan ? d.plan.name : '', pending_all: d.pending }
+      pending: o.ask ? d.pending : [], data: { indicators: d.indicators, alerts: d.alerts, favorables: d.favorables, monitoring: d.monitoring, labs: d.labs, sections: d.sections, supplements: d.supplements, competitions: d.competitions, goal: d.goal, plan_name: d.plan ? d.plan.name : '', pending_all: d.pending, hidden: [...(st.hidden || [])] }
     });
     out.reportId = rep.id;
     if (st.doc) { prog('Documento…'); await attachCaseDoc(rep, st.doc); }
@@ -536,25 +546,62 @@ const V7_NOTICE = '<div class="card warn-box"><p><b>Función pendiente de activa
 async function casesOf(cid) { if (S.needsV7) return []; try { return await DB.select('case_reports', { eq: { client_id: cid }, order: 'created_at', asc: false }); } catch (e) { return []; } }
 async function answersFor(ids) { if (!ids.length) return []; try { return await DB.select('case_answers', { inn: { report_id: ids } }); } catch (e) { return []; } }
 const LVL = { alta: 'Alta', media: 'Media', baja: 'Baja' };
+/* ---------- visibilidad por sección (lo que ve el asesorado) ---------- */
+const TRAIN_RE = /entrenamiento|rutina|ejercicio|fuerza|taper|series|periodizaci|sesi[oó]n(es)? de|carrera|movilidad/i;
+const NUTRI_RE = /aliment|nutric|comida|mercado|hidrataci|men[uú]|preparaci[oó]n en lote|carbohidrat|suplement|dieta/i;
+async function tierOf(cid) { if (S.needsV6) return 'completo'; try { const m = (await DB.select('memberships', { eq: { client_id: cid } }))[0]; return m && TIERS[m.tier] ? m.tier : 'completo'; } catch (e) { return 'completo'; } }
+/* Bloques que se pueden ocultar, con su etiqueta */
+function caseBlocks(d, pend, hasDoc) {
+  const b = [['resumen', 'Resumen y objetivo']];
+  if ((d.indicators || []).length) b.push(['indicadores', 'Indicadores']);
+  if ((d.alerts || []).length) b.push(['alertas', 'Prioridades detectadas']);
+  if ((d.favorables || []).length) b.push(['favorables', 'Factores favorables']);
+  if ((pend || []).length) b.push(['preguntas', 'Preguntas pendientes']);
+  if ((d.monitoring || []).length) b.push(['monitoreo', 'Monitoreo']);
+  if (d.labs && ((d.labs.tests || []).length || d.labs.notes)) b.push(['laboratorios', 'Laboratorios']);
+  if ((d.supplements || []).length) b.push(['suplementos', 'Suplementación']);
+  (d.sections || []).forEach((s, i) => b.push(['sec' + i, s.title || 'Sección ' + (i + 1)]));
+  if (hasDoc) b.push(['documento', 'Documento completo (PDF/HTML)']);
+  return b;
+}
+/* Ocultos por defecto según el nivel de servicio del asesorado */
+function tierHidden(tier, d) {
+  const h = [];
+  (d.sections || []).forEach((s, i) => { const t = (s.title || '') + ' ' + (s.content || '').slice(0, 300); if (tier === 'nutricion' && TRAIN_RE.test(s.title || '') && !NUTRI_RE.test(s.title || '')) h.push('sec' + i); if (tier === 'entrenamiento' && NUTRI_RE.test(t) && !TRAIN_RE.test(s.title || '')) h.push('sec' + i); });
+  if (tier === 'entrenamiento') h.push('suplementos');
+  return h;
+}
+/* Copia del expediente con solo lo visible para el asesorado */
+function clientCase(rep) {
+  const H = new Set(((rep.data || {}).hidden) || []); if (!H.size) return rep;
+  const d = Object.assign({}, rep.data || {});
+  if (H.has('resumen')) d.goal = ''; if (H.has('indicadores')) d.indicators = []; if (H.has('alertas')) d.alerts = []; if (H.has('favorables')) d.favorables = [];
+  if (H.has('monitoreo')) d.monitoring = []; if (H.has('laboratorios')) d.labs = null; if (H.has('suplementos')) d.supplements = [];
+  d.sections = (d.sections || []).filter((s, i) => !H.has('sec' + i));
+  return Object.assign({}, rep, { data: d, summary: H.has('resumen') ? null : rep.summary, pending: H.has('preguntas') ? [] : rep.pending, doc_path: H.has('documento') ? null : rep.doc_path });
+}
 function caseBlocksHtml(rep, ans, coach) {
   const d = rep.data || {}; const pend = rep.pending || []; const A = (ans && ans.answers) || [];
+  const H = new Set(d.hidden || []);
+  const tg = k => coach ? ` <button class="chip sm vis${H.has(k) ? '' : ' on'}" data-act="cSec" data-id="${rep.id}" data-k="${k}" title="Visible u oculto para el asesorado">${H.has(k) ? 'Oculto' : 'Visible'}</button>` : '';
+  const cc = k => coach && H.has(k) ? 'card hid' : 'card';
   let h = '';
-  if ((d.indicators || []).length) h += `<div class="card"><h3>Indicadores</h3><table class="tbl"><tbody>${d.indicators.map(x => `<tr><td>${esc(x.name)}</td><td><b>${esc(x.value)}</b> ${esc(x.unit || '')}${x.ref ? `<br><small class="muted">Referencia: ${esc(x.ref)}</small>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
-  if ((d.alerts || []).length) h += `<div class="card"><h3>Prioridades detectadas</h3>${d.alerts.map(a => `<div class="alert-i ${esc(a.level)}"><b>${esc(LVL[a.level] || a.level || '')} · ${esc(a.title)}</b>${a.detail ? `<span class="pre">${esc(a.detail)}</span>` : ''}</div>`).join('')}</div>`;
-  if ((d.favorables || []).length) h += `<div class="card"><h3>Factores favorables</h3><ul class="small">${d.favorables.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+  if ((d.indicators || []).length) h += `<div class="${cc('indicadores')}"><h3>Indicadores${tg('indicadores')}</h3><table class="tbl"><tbody>${d.indicators.map(x => `<tr><td>${esc(x.name)}</td><td><b>${esc(x.value)}</b> ${esc(x.unit || '')}${x.ref ? `<br><small class="muted">Referencia: ${esc(x.ref)}</small>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
+  if ((d.alerts || []).length) h += `<div class="${cc('alertas')}"><h3>Prioridades detectadas${tg('alertas')}</h3>${d.alerts.map(a => `<div class="alert-i ${esc(a.level)}"><b>${esc(LVL[a.level] || a.level || '')} · ${esc(a.title)}</b>${a.detail ? `<span class="pre">${esc(a.detail)}</span>` : ''}</div>`).join('')}</div>`;
+  if ((d.favorables || []).length) h += `<div class="${cc('favorables')}"><h3>Factores favorables${tg('favorables')}</h3><ul class="small">${d.favorables.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
   if (pend.length) {
-    if (coach) h += `<div class="card"><h3>Preguntas para el asesorado</h3>${pend.map((p, i) => `<div class="pend-q"><p><b>${i + 1}. ${esc(p.q)}</b>${p.why ? `<br><small>${esc(p.why)}</small>` : ''}</p><p class="small">${A[i] && A[i].a ? esc(A[i].a) : '<span class="muted">Sin respuesta</span>'}</p></div>`).join('')}
+    if (coach) h += `<div class="${cc('preguntas')}"><h3>Preguntas para el asesorado${tg('preguntas')}</h3>${pend.map((p, i) => `<div class="pend-q"><p><b>${i + 1}. ${esc(p.q)}</b>${p.why ? `<br><small>${esc(p.why)}</small>` : ''}</p><p class="small">${A[i] && A[i].a ? esc(A[i].a) : '<span class="muted">Sin respuesta</span>'}</p></div>`).join('')}
       ${ans ? `<p class="small muted">Respondidas el ${esc(fmtDateLong(String(ans.updated_at || ans.created_at).slice(0, 10)))}.</p>` : ''}<div class="row-btns"><button class="btn sm" data-act="cqAdd" data-id="${rep.id}">+ Pregunta</button></div></div>`;
     else h += `<div class="card"><h3>Preguntas de tu entrenador</h3><p class="small muted">Tus respuestas permiten ajustar el plan a tu situación real.</p>${pend.map((p, i) => `<div class="pend-q"><p><b>${i + 1}. ${esc(p.q)}</b>${p.why ? `<br><small>${esc(p.why)}</small>` : ''}</p><textarea class="input" rows="2" data-pq="${i}">${esc(A[i] ? A[i].a : '')}</textarea></div>`).join('')}<button class="btn primary block" data-act="cqSend" data-id="${rep.id}">Enviar respuestas</button></div>`;
   } else if (coach) h += `<div class="row-btns"><button class="btn sm" data-act="cqAdd" data-id="${rep.id}">+ Pregunta para el asesorado</button></div>`;
-  if ((d.monitoring || []).length) h += `<div class="card"><h3>Monitoreo</h3><table class="tbl"><thead><tr><th>Variable</th><th>Frecuencia</th><th>Criterio</th></tr></thead><tbody>${d.monitoring.map(x => `<tr><td>${esc(x.variable)}</td><td class="small">${esc(x.freq)}</td><td class="small">${esc(x.criterion)}</td></tr>`).join('')}</tbody></table></div>`;
-  if (d.labs && (d.labs.tests.length || d.labs.notes)) h += `<div class="card"><h3>Laboratorios</h3>${d.labs.tests.length ? `<ul class="small">${d.labs.tests.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}${d.labs.notes ? `<p class="small pre">${esc(d.labs.notes)}</p>` : ''}</div>`;
-  if ((d.supplements || []).length) h += `<div class="card"><h3>Suplementación</h3><table class="tbl"><tbody>${d.supplements.map(s => `<tr><td><b>${esc(s.name)}</b></td><td class="small">${esc([s.dose, s.timing, s.note].filter(Boolean).join(' · '))}</td></tr>`).join('')}</tbody></table></div>`;
-  for (const s of d.sections || []) h += `<div class="card">${s.title ? `<h3>${esc(s.title)}</h3>` : ''}<p class="small pre">${esc(s.content)}</p></div>`;
+  if ((d.monitoring || []).length) h += `<div class="${cc('monitoreo')}"><h3>Monitoreo${tg('monitoreo')}</h3><table class="tbl"><thead><tr><th>Variable</th><th>Frecuencia</th><th>Criterio</th></tr></thead><tbody>${d.monitoring.map(x => `<tr><td>${esc(x.variable)}</td><td class="small">${esc(x.freq)}</td><td class="small">${esc(x.criterion)}</td></tr>`).join('')}</tbody></table></div>`;
+  if (d.labs && (d.labs.tests.length || d.labs.notes)) h += `<div class="${cc('laboratorios')}"><h3>Laboratorios${tg('laboratorios')}</h3>${d.labs.tests.length ? `<ul class="small">${d.labs.tests.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}${d.labs.notes ? `<p class="small pre">${esc(d.labs.notes)}</p>` : ''}</div>`;
+  if ((d.supplements || []).length) h += `<div class="${cc('suplementos')}"><h3>Suplementación${tg('suplementos')}</h3><table class="tbl"><tbody>${d.supplements.map(s => `<tr><td><b>${esc(s.name)}</b></td><td class="small">${esc([s.dose, s.timing, s.note].filter(Boolean).join(' · '))}</td></tr>`).join('')}</tbody></table></div>`;
+  (d.sections || []).forEach((s, i) => { h += `<div class="${cc('sec' + i)}">${s.title || coach ? `<h3>${esc(s.title || 'Sección')}${tg('sec' + i)}</h3>` : ''}<p class="small pre">${esc(s.content)}</p></div>`; });
   return h;
 }
-function caseDocHtml(rep, client, logo, ans) {
-  const d = rep.data || {}; const pend = rep.pending || []; const A = (ans && ans.answers) || [];
+function caseDocHtml(rep0, client, logo, ans) {
+  const rep = clientCase(rep0); const d = rep.data || {}; const pend = rep.pending || []; const A = (ans && ans.answers) || [];
   let h = `<div class="doc-h">${logo ? `<img class="doc-logo" src="${esc(logo)}" alt="">` : ''}<div><h1>${esc(rep.title || 'Plan integral')}</h1><p><b>${esc(client.full_name || '')}</b>${d.plan_name ? ' · ' + esc(d.plan_name) : ''}</p><p class="doc-sub">${esc(BRAND.name)} · ${esc(fmtDateLong(rep.report_date))}</p></div></div>`;
   if (d.goal) h += `<p><b>Objetivo:</b> ${esc(d.goal)}</p>`;
   if (rep.summary) h += `<h2>Resumen</h2><p class="pre">${esc(rep.summary)}</p>`;
@@ -581,7 +628,7 @@ async function openCaseDoc(rep) {
 async function caseView(cid, sub, coach) {
   if (S.needsV7) return { html: V7_NOTICE };
   const client = cid === S.profile.id ? S.profile : (await DB.select('profiles', { eq: { id: cid } }))[0] || {};
-  let reps = await casesOf(cid); if (!coach) reps = reps.filter(r => r.visible);
+  let reps = await casesOf(cid); if (!coach) reps = reps.filter(r => r.visible).map(clientCase);
   const ans = await answersFor(reps.map(r => r.id));
   const top = coach ? `<div class="row-btns"><a class="btn primary" href="#/importar/${cid}" data-act="impNew">Importar plan</a><button class="btn" data-act="pkg">Paquete para la IA</button><button class="btn" data-act="pkgCopy">Copiar paquete</button><button class="btn" data-act="guide">Instrucciones IA</button></div>` : '';
   if (!reps.length) return { html: top + `<div class="card empty"><p>${coach ? 'Sin expedientes. Importa el plan individual generado en tu análisis para llenar el perfil del asesorado, o descarga el paquete de análisis.' : 'Tu entrenador todavía no ha publicado tu plan integral.'}</p></div>`, click: caseHandlers(cid, client, reps, ans, coach) };
@@ -590,8 +637,12 @@ async function caseView(cid, sub, coach) {
   if (coach && a && !a.seen) DB.update('case_answers', a.id, { seen: true }).catch(() => { });
   const plan = rep.plan_id ? (await DB.select('nutrition_plans', { eq: { id: rep.plan_id } }).catch(() => []))[0] : null;
   let h = top;
+  const H = new Set((rep.data || {}).hidden || []);
+  const tier = coach ? await tierOf(cid) : 'completo';
+  if (coach) h += rep.visible ? `<div class="card ok-box small"><b>Publicado:</b> el asesorado lo ve en Perfil › Mi plan integral${H.size ? ` (${H.size} ${H.size === 1 ? 'sección oculta' : 'secciones ocultas'})` : ''}. Usa los botones «Visible / Oculto» de cada sección para elegir qué ve.${tier !== 'completo' ? ` Nivel de servicio: ${esc(TIERS[tier])}.` : ''}</div>` : `<div class="card warn-box small"><b>No publicado:</b> el asesorado no ve este expediente. <button class="btn sm primary" data-act="cVis" data-id="${rep.id}">Publicar al asesorado</button></div>`;
   if (reps.length > 1) h += `<div class="chips scroll">${reps.map(r => `<a class="chip${r === rep ? ' on' : ''}" href="${coach ? `#/asesorado/${cid}/expediente/${r.id}` : `#/expediente/${r.id}`}">${esc(fmtDM(parseDay(r.report_date)))}${coach && !r.visible ? ' · oculto' : ''}</a>`).join('')}</div>`;
   h += `<div class="card"><div class="day-h"><div><h3>${esc(rep.title || 'Plan integral')}</h3><small class="muted">${esc(fmtDateLong(rep.report_date))}${plan ? ' · ' + esc(plan.name) : ''}</small></div>${coach ? `<span class="badge ${rep.visible ? 'ok' : ''}">${rep.visible ? 'Visible' : 'Oculto'}</span>` : ''}</div>
+      ${coach ? `<p class="small">Resumen y objetivo: <button class="chip sm vis${H.has('resumen') ? '' : ' on'}" data-act="cSec" data-id="${rep.id}" data-k="resumen">${H.has('resumen') ? 'Oculto' : 'Visible'}</button>${rep.doc_path ? ` · Documento completo: <button class="chip sm vis${H.has('documento') ? '' : ' on'}" data-act="cSec" data-id="${rep.id}" data-k="documento">${H.has('documento') ? 'Oculto' : 'Visible'}</button>` : ''}</p>` : ''}
       ${(rep.data || {}).goal ? `<p class="small"><b>Objetivo:</b> ${esc(rep.data.goal)}</p>` : ''}
       ${rep.summary ? `<p class="small pre">${esc(rep.summary)}</p>` : ''}
       <div class="row-btns">${rep.doc_path ? `<button class="btn sm primary" data-act="cDoc" data-id="${rep.id}">Documento completo (${rep.doc_type === 'pdf' ? 'PDF' : 'HTML'})</button>` : ''}${plan ? `<a class="btn sm" href="#/plan-ver/${plan.id}">Plan nutricional</a>` : ''}<button class="btn sm" data-act="cPdf" data-id="${rep.id}">Expediente PDF</button><button class="btn sm" data-act="cHtml" data-id="${rep.id}">Expediente HTML</button></div>
@@ -610,6 +661,11 @@ function caseHandlers(cid, client, reps, ans, coach) {
     cDoc: async el => { el.disabled = true; try { await openCaseDoc(R(el.dataset.id)); } catch (e) { toast(errMsg(e), 'error'); } finally { el.disabled = false; } },
     cPdf: el => docs(el.dataset.id).pdf(),
     cHtml: el => docs(el.dataset.id).html(),
+    cSec: async el => {
+      const r = R(el.dataset.id); const d = Object.assign({}, r.data || {}); const H = new Set(d.hidden || []); const k = el.dataset.k;
+      if (H.has(k)) H.delete(k); else H.add(k); d.hidden = [...H];
+      await DB.update('case_reports', r.id, { data: d }); keepScroll(() => route());
+    },
     cVis: async el => { const r = R(el.dataset.id); await DB.update('case_reports', r.id, { visible: !r.visible }); route(); },
     cDel: async el => { if (!confirm('¿Eliminar este expediente y su documento? El plan nutricional importado se conserva.')) return; const r = R(el.dataset.id); if (r.doc_path) await DocFiles.del(r.doc_path).catch(() => { }); await DB.remove('case_reports', r.id); toast('Expediente eliminado'); location.hash = `#/asesorado/${cid}/expediente`; },
     cqAdd: async el => {
@@ -632,7 +688,7 @@ async function expedienteTab(cid, sub) { return caseView(cid, sub, true); }
 async function vMiExpediente(id) { const r = await caseView(S.profile.id, id, false); paint(r.html, { click: r.click || {} }, 'Mi plan integral'); }
 async function caseCardHtml() {
   if (S.needsV7) return '';
-  const reps = (await casesOf(S.profile.id)).filter(r => r.visible); const rep = reps[0]; if (!rep) return '';
+  const reps = (await casesOf(S.profile.id)).filter(r => r.visible).map(clientCase); const rep = reps[0]; if (!rep) return '';
   const pend = rep.pending || []; if (!pend.length) return '';
   const a = (await answersFor([rep.id]))[0]; const done = a ? a.answers.filter(x => x.a).length : 0;
   if (done >= pend.length) return '';

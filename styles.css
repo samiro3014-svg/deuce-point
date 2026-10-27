@@ -499,3 +499,7 @@ textarea.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fon
 .doc-x .doc { min-width: 0; }
 .doc .doc-t small { color: #5f6d79; font-size: 11px; }
 @media print { .doc-x { overflow: visible; } }
+.ok-box { border-left: 4px solid var(--ok); background: rgba(111, 178, 50, .08); }
+.card.hid { opacity: .55; }
+.chip.vis { margin-left: 6px; vertical-align: middle; font-weight: 500; }
+.chip.vis.on { background: var(--ok); border-color: var(--ok); }
