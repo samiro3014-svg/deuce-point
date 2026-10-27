@@ -6,6 +6,20 @@ Dirección: https://samiro3014-svg.github.io/deuce-point/
 
 ---
 
+## Novedades de la versión 8 · personalización y experiencia
+
+- **Hábitos diarios:** el anexo admite `HABITO: acción | frecuencia`. El asesorado los marca en Hoy y el cumplimiento de 7 días aparece en el expediente y en el paquete para la IA. También se agregan o quitan desde el expediente.
+- **Metas medibles:** `META: variable | inicial | meta | unidad | fecha`. Peso, cintura, % grasa, pasos, agua, cumplimiento del plan y hábitos se actualizan solos con los registros; las demás se actualizan desde el expediente. Se muestran como barras de avance en Hoy y en Mi plan.
+- **Visibilidad por sección:** botones Visible/Oculto en cada sección del expediente; ajuste automático para asesorías de solo nutrición o solo entrenamiento.
+- **Módulos por asesorado:** en la ficha, «Módulos visibles para el asesorado» (bienestar, pasos, suplementos, rendimiento deportivo, ciclo, racha y logros, lecciones, retos, fotos).
+- **Hoy simplificado:** máximo dos pendientes arriba, después las metas del día (macronutrientes, hábitos, metas, agua), entrenamiento y comidas; lo secundario al final.
+- **Mi plan** en la barra principal del asesorado.
+- **Ficha agrupada:** Expediente · Plan · Seguimiento · Mensajes.
+- **Uso de la API** en Ajustes: documentos convertidos y costo por mes.
+- **Consentimiento:** la autorización de datos menciona el procesamiento por proveedores tecnológicos (aplica a las nuevas valoraciones).
+
+No requiere migración nueva: funciona con la v7.
+
 ## Novedades de la versión 7 · individualización
 
 ### Tipos de día en el plan nutricional

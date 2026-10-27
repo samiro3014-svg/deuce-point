@@ -503,3 +503,16 @@ textarea.code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; fon
 .card.hid { opacity: .55; }
 .chip.vis { margin-left: 6px; vertical-align: middle; font-weight: 500; }
 .chip.vis.on { background: var(--ok); border-color: var(--ok); }
+/* ---------- v8 · personalización ---------- */
+.seg.tabs-g { margin: 10px 0 6px; }
+.seg.tabs-g > a { font-size: 13px; padding: 8px 4px; }
+details.mods { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+details.mods summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.gbars { display: grid; gap: 10px; margin: 6px 0; }
+.gb-row .gb-h { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; }
+.gb-row .gb-h span { color: var(--muted); white-space: nowrap; }
+.gb-row .hb-t { height: 10px; border-radius: 6px; background: var(--bg); overflow: hidden; margin: 4px 0 2px; }
+.gb-row .hb-f { height: 100%; background: var(--ok); border-radius: 6px; }
+.gb-row small { font-size: 12px; }
+a.card.goals-c { display: block; color: inherit; text-decoration: none; }
+.card.habits h3 { margin: 0; }

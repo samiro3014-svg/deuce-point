@@ -398,6 +398,18 @@ async function vHoy(date, cid) {
   }
   if (tk.rows.length) html += `<p class="small muted">Tenis hoy: ${tk.rows.map(r => `${r.kind.toLowerCase()} de ${r.minutes} min`).join(', ')} · gasto estimado ${fmtInt(tk.gross)} kcal${tk.kcal ? ` · +${fmtInt(tk.kcal)} kcal sumadas al objetivo (70 % carbohidratos, 30 % grasa)${tk.assumed ? `; el plan ya incluye ${String(tk.assumed).replace('.', ',')} sesiones por semana` : ''}` : tday && dayType === tday.type ? ' · cubierto por la meta de carbohidratos del día de torneo' : multi ? ' · incluido en las metas del tipo de día' : ''}.</p>`;
   if (own && isToday && S.profile.goal) html += `<div class="goal"><small>Objetivo</small>${esc(S.profile.goal)}</div>`;
+  const mo = k => typeof modOn !== 'function' || modOn(k, cid);
+  // Pendientes del día: se muestran arriba como máximo dos; el resto va al final
+  let tail = '';
+  if (own && isToday) {
+    const tasks = [];
+    if (typeof checkinCardsHtml === 'function' && !S.needsMigration) tasks.push(await checkinCardsHtml(cid).catch(() => ''));
+    if (typeof caseCardHtml === 'function') tasks.push(await caseCardHtml().catch(() => ''));
+    if (typeof surveyCardHtml === 'function') tasks.push(await surveyCardHtml().catch(() => ''));
+    if (typeof clientMembershipCard === 'function') tasks.push(await clientMembershipCard().catch(() => ''), await clientReportCard().catch(() => ''));
+    const tk2 = tasks.filter(Boolean); html += tk2.slice(0, 2).join(''); if (tk2.length > 2) tail += `<h2 class="sec">Otros pendientes</h2>` + tk2.slice(2).join('');
+    if (typeof messageCardHtml === 'function') html += await messageCardHtml().catch(() => '');
+  }
   if (nut) html += `<div class="card sum">
     <div class="sum-top"><div><b>${fmtInt(tot.kcal)}</b><small>Consumidas</small></div>
     <div class="sum-mid"><b class="${left < 0 ? 'over' : ''}">${hasT ? fmtInt(Math.abs(left)) : '—'}</b><small>${left < 0 ? 'kcal por encima' : 'kcal restantes'}</small></div>
@@ -407,16 +419,18 @@ async function vHoy(date, cid) {
   html += `<div class="card"><div class="mb-h"><span>Agua</span><span><b>${(water / 1000).toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b> / ${(waterT / 1000).toLocaleString('es-CO', { maximumFractionDigits: 1 })} L</span></div>
     <div class="mb-t"><div class="mb-f w" style="width:${Math.min(100, water / waterT * 100).toFixed(1)}%"></div></div>
     <div class="row-btns"><button class="btn sm" data-act="water" data-d="-250">− 250 ml</button><button class="btn sm primary" data-act="water" data-d="250">+ 250 ml</button><button class="btn sm" data-act="water" data-d="500">+ 500 ml</button></div>
-    ${S.needsV6 ? '' : `<label class="steps-in"><span>Pasos del día</span><input class="input" data-steps inputmode="numeric" value="${num(daily && daily.steps) || ''}" placeholder="0"></label>`}</div>`;
-  if (own && isToday && typeof messageCardHtml === 'function') html += (await messageCardHtml()) + (await streakCardHtml()) + (await lessonCardHtml()) + (await challengeCardHtml().catch(() => ''));
-  if (own && isToday && typeof wellnessCardHtml === 'function') html += await wellnessCardHtml();
-  if (own && isToday && typeof cycleCardHtml === 'function') html += await cycleCardHtml();
-  if (own && isToday && typeof supplementCardHtml === 'function') html += await supplementCardHtml().catch(() => '');
+    ${S.needsV6 || !mo('pasos') ? '' : `<label class="steps-in"><span>Pasos del día</span><input class="input" data-steps inputmode="numeric" value="${num(daily && daily.steps) || ''}" placeholder="0"></label>`}</div>`;
+  if (own && typeof habitsCardHtml === 'function') html += await habitsCardHtml(date, daily).catch(() => '');
+  if (own && isToday && typeof goalsCardHtml === 'function') html += await goalsCardHtml().catch(() => '');
+  if (own && isToday && typeof wellnessCardHtml === 'function' && mo('bienestar')) html += await wellnessCardHtml();
   if (own && isToday && (typeof showsTraining !== 'function' || showsTraining())) html += await workoutCardHtml(cid);
-  if (own && isToday && typeof surveyCardHtml === 'function') html += await surveyCardHtml().catch(() => '');
-  if (own && isToday && typeof caseCardHtml === 'function') html += await caseCardHtml().catch(() => '');
-  if (own && isToday && typeof checkinCardsHtml === 'function' && !S.needsMigration) html += await checkinCardsHtml(cid).catch(() => '');
-  if (own && isToday && typeof clientMembershipCard === 'function') html += (await clientMembershipCard()) + (await clientReportCard());
+  if (own && isToday && typeof supplementCardHtml === 'function' && mo('suplementos')) html += await supplementCardHtml().catch(() => '');
+  if (own && isToday) {
+    if (typeof cycleCardHtml === 'function' && mo('ciclo')) tail += await cycleCardHtml();
+    if (typeof streakCardHtml === 'function' && mo('logros')) tail += await streakCardHtml().catch(() => '');
+    if (typeof lessonCardHtml === 'function' && mo('lecciones')) tail += await lessonCardHtml().catch(() => '');
+    if (typeof challengeCardHtml === 'function' && mo('retos')) tail += await challengeCardHtml().catch(() => '');
+  }
 
   if (!nut) html += '<div class="card empty"><p>Tu asesoría incluye el plan de entrenamiento. Puedes registrar el agua, los pasos y el bienestar diario.</p></div>';
   else if (!plan) html += `<div class="card empty"><p>${own ? (S.intake && S.intake.status === 'pending' ? 'Tu entrenador está revisando tu valoración y tu plan nutricional. Cuando lo apruebe aparecerá aquí.' : 'Tu entrenador todavía no te ha asignado un plan nutricional.') : 'Este asesorado no tiene un plan nutricional activo.'}</p><p class="small muted">Puedes registrar alimentos libremente en cada comida.</p></div>`;
@@ -462,6 +476,7 @@ async function vHoy(date, cid) {
   const orphans = logs.filter(l => !used.has(l.id));
   if (nut && orphans.length) html += `<div class="card meal"><div class="meal-h"><h3>Otros registros</h3></div>${orphans.map(logRow).join('')}</div>`;
   if (nut && plan) html += `<div class="row-btns"><a class="btn" href="#/plan-ver/${full.id}">Ver plan completo</a><a class="btn" href="#/compras/${full.id}">Lista de compras</a>${own && typeof vFuera === 'function' ? '<a class="btn" href="#/fuera">Comer fuera de casa</a>' : ''}</div>`;
+  html += tail;
 
   paint(html, {
     change: async t => { if ('steps' in t.dataset) { await upsertDaily(cid, date, { steps: Math.max(0, Math.round(num(t.value))) }); toast('Pasos guardados'); } },
@@ -471,6 +486,7 @@ async function vHoy(date, cid) {
       ...(typeof supplementHandlers === 'function' ? supplementHandlers(rerender) : {}),
       ...(typeof cycleHandlers === 'function' ? cycleHandlers(rerender) : {}),
       ...(typeof challengeHandlers === 'function' ? challengeHandlers(rerender) : {}),
+      ...(typeof habitHandlers === 'function' ? habitHandlers(cid, date, choices, rerender) : {}),
       recipe: el => { const m = mealByKey[el.dataset.meal]; const o = chosenOption(m, choices, date); if (o) recipeModal(o, rf); },
       dtype: async el => { const c = Object.assign({}, choices); if (el.dataset.v) c.__dtype = el.dataset.v; else delete c.__dtype; await upsertDaily(cid, date, { choices: c }); rerender(); },
       dayT: async el => { await upsertDaily(cid, date, { choices: Object.assign({}, choices, { __day: el.dataset.v }) }); rerender(); },
@@ -741,7 +757,7 @@ async function adherenceSection(cid, dayLink) {
 }
 
 /* Pestañas de Progreso del asesorado */
-const progSeg = a => `<div class="chips scroll tabs2">${[['historial', 'Entrenamiento'], ['progreso', 'Ejercicios'], ['rendimiento', 'Rendimiento'], ['cuerpo', 'Cuerpo'], ['adherencia', 'Nutrición'], ['logros', 'Logros'], ['fotos', 'Fotos']].map(([k, l]) => `<a class="chip${a === k ? ' on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
+const progSeg = a => `<div class="chips scroll tabs2">${[['historial', 'Entrenamiento'], ['progreso', 'Ejercicios'], ['rendimiento', 'Rendimiento'], ['cuerpo', 'Cuerpo'], ['adherencia', 'Nutrición'], ['logros', 'Logros'], ['fotos', 'Fotos']].filter(([k]) => typeof modOn !== 'function' || !({ rendimiento: 'tenis', logros: 'logros', fotos: 'fotos' })[k] || modOn(({ rendimiento: 'tenis', logros: 'logros', fotos: 'fotos' })[k])).map(([k, l]) => `<a class="chip${a === k ? ' on' : ''}" href="#/${k}">${l}</a>`).join('')}</div>`;
 async function vCuerpo() { const b = await bodySection(S.profile.id); if (typeof antropometriaTab === 'function' && !S.needsV6) { const a = await antropometriaTab(S.profile.id); if ((await DB.select('anthropometry', { eq: { client_id: S.profile.id }, limit: 1 })).length) { b.html += '<h2 class="sec">Antropometría</h2>' + a.html; Object.assign(b.click, a.click); } } const pj = S.intake && S.intake.status === 'approved' && typeof projectionHtml === 'function' ? projectionHtml(S.intake.calc) : ''; paint(progSeg('cuerpo') + b.html + pj, { click: b.click }, 'Progreso'); }
 async function vAdherencia() { const a = await adherenceSection(S.profile.id, d => '#/hoy/' + d); paint(progSeg('adherencia') + a.html, {}, 'Progreso'); }
 

@@ -116,7 +116,7 @@ const INTAKE = [
   { t: 'Movilidad', d: 'Pruebas sencillas para elegir los ejercicios adecuados para ti. Hazlas descalzo o descalza, sin calentar y sin forzar. Si no puedes hacerlas ahora, elige «No sé»: tu entrenador puede evaluarlas en persona.', f: SCREEN_FIELDS },
   { t: 'Autorizaciones', d: 'Lee y marca las autorizaciones para enviar la valoración.', f: [
     { id: 'consentimiento', type: 'consent', req: 1, label: 'Entiendo que el programa es una asesoría de nutrición y entrenamiento que no reemplaza la atención médica, y declaro que la información que entrego es verídica.' },
-    { id: 'datos', type: 'consent', req: 1, label: 'Autorizo el tratamiento de mis datos personales y de salud con fines exclusivos de la asesoría, conforme a la Ley 1581 de 2012.' },
+    { id: 'datos', type: 'consent', req: 1, label: 'Autorizo el tratamiento de mis datos personales y de salud con fines exclusivos de la asesoría, incluido su almacenamiento y procesamiento por proveedores tecnológicos (alojamiento de datos y herramientas de análisis con inteligencia artificial), conforme a la Ley 1581 de 2012.' },
     { id: 'fotos', type: 'consent', label: 'Autorizo el uso de mis fotos de progreso y resultados con fines educativos y de difusión. Puedo solicitar que no se muestre mi rostro. (Opcional)' }]}
 ];
 
@@ -1168,6 +1168,7 @@ async function vAjustes() {
       <label class="field"><span>Servicios: uno por línea con el formato Nombre | Precio | Descripción</span><textarea class="input" rows="4" data-s="landing_services" placeholder="Nutrición | $150.000 / mes | Plan de alimentación y seguimiento semanal">${esc(s.landing_services || '')}</textarea></label>
       <p class="small muted">Enlace y código QR en Negocio › Página y QR.</p></div>
     ${typeof vapidCardHtml === 'function' ? await vapidCardHtml() : ''}
+    ${typeof apiUsageCardHtml === 'function' ? await apiUsageCardHtml() : ''}
     <div class="card"><h3>Preguntas adicionales de la valoración inicial</h3>
       <label class="field"><span>Una pregunta por línea. Para preguntas de opción: Pregunta | opción 1 / opción 2 / opción 3</span><textarea class="input" rows="5" data-s="extra_questions" placeholder="¿A qué hora empieza tu entrenamiento principal?\n¿Usas anticoncepción hormonal? | Sí / No / Prefiero no responder\n¿Cuánto tiempo tienes para cocinar al día? | Menos de 30 min / 30 a 60 min / Más de 60 min">${esc(s.extra_questions || '')}</textarea></label>
       <p class="small muted">Se agregan como un paso adicional antes de las autorizaciones. Las respuestas aparecen en la valoración y en el paquete de análisis para tu IA. A los asesorados actuales puedes enviarles preguntas desde su expediente.</p></div>

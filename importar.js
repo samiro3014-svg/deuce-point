@@ -35,7 +35,7 @@ function parseImportText(text) {
 }
 /* ---------- anexo «Datos de carga» del PDF: lectura directa, sin costo de API ---------- */
 const ANX_START = /={2,}\s*DEUCE\s*POINT\s*DATOS\s*={2,}/i, ANX_END = /={2,}\s*FIN\s*={2,}/i;
-const ANX_KEYS = new Set(['ASESORADO', 'FECHA', 'TITULO', 'OBJETIVO', 'RESUMEN', 'INDICADOR', 'ALERTA', 'FAVORABLE', 'PENDIENTE', 'PLAN', 'TIPO', 'COMIDA', 'OPCION', 'FECHA_ESPECIAL', 'ALIMENTO_NUEVO', 'SUPLEMENTO', 'COMPETENCIA', 'RUTINA', 'SESION', 'EJERCICIO', 'MONITOREO', 'LABORATORIO', 'LAB_INDICACIONES', 'SECCION']);
+const ANX_KEYS = new Set(['HABITO', 'META', 'ASESORADO', 'FECHA', 'TITULO', 'OBJETIVO', 'RESUMEN', 'INDICADOR', 'ALERTA', 'FAVORABLE', 'PENDIENTE', 'PLAN', 'TIPO', 'COMIDA', 'OPCION', 'FECHA_ESPECIAL', 'ALIMENTO_NUEVO', 'SUPLEMENTO', 'COMPETENCIA', 'RUTINA', 'SESION', 'EJERCICIO', 'MONITOREO', 'LABORATORIO', 'LAB_INDICACIONES', 'SECCION']);
 const hasAnnex = t => ANX_START.test(String(t || ''));
 function annexRecords(text) {
   text = String(text || ''); const s = text.search(ANX_START); if (s < 0) return null;
@@ -73,6 +73,8 @@ function parseAnnex(text) {
       case 'ALERTA': d.alertas.push({ prioridad: f[0], titulo: f[1] || f[0], detalle: anxText(rest(2)) }); break;
       case 'FAVORABLE': d.favorables.push(...v.split(';').map(x => x.trim()).filter(Boolean)); break;
       case 'PENDIENTE': d.pendientes.push({ pregunta: f[0], motivo: rest(1) }); break;
+      case 'HABITO': (d.habitos = d.habitos || []).push({ habito: f[0], frecuencia: f[1] || 'Diario' }); break;
+      case 'META': (d.metas = d.metas || []).push({ variable: f[0], inicial: f[1], meta: f[2], unidad: f[3] || '', fecha: f[4] || '' }); break;
       case 'PLAN': Object.assign(P(), { nombre: f[0], agua_ml: anxNum(f[1]), indicaciones: anxText(rest(2)) }); break;
       case 'TIPO': ty = { codigo: f[0], nombre: f[1], dias: f[2] || '', kcal: anxNum(f[3]), proteina_g: anxNum(f[4]), carbohidratos_g: anxNum(f[5]), grasa_g: anxNum(f[6]), agua_ml: anxNum(f[7]), indicaciones: anxText(rest(8)), comidas: [] }; P().tipos_de_dia.push(ty); meal = opt = null; break;
       case 'COMIDA': meal = { hora: f[0], nombre: f[1] || f[0], indicaciones: anxText(rest(2)), opciones: [] }; T().comidas.push(meal); opt = null; break;
@@ -140,6 +142,7 @@ async function aiConvert(text) {
   if (error) { let m = error.message; try { const j = await error.context.json(); if (j && j.error) m = j.error; } catch (e) { } throw new Error(/not found|404/i.test(m) ? 'La función «convertir-plan» no está publicada en Supabase. Revisa la guía de activación.' : m); }
   if (typeof data === 'string') { try { data = JSON.parse(data); } catch (e) { throw new Error('Respuesta no válida de la función: ' + data.slice(0, 160)); } }
   if (data && data.error) throw new Error(data.error);
+  if (data && data.text && typeof logApiUse === 'function') { const md0 = String(data.model || ''); const pr0 = /opus/.test(md0) ? [4, 20] : /haiku/.test(md0) ? [1, 5] : [2, 10]; const u0 = data.usage || {}; logApiUse({ usd: (num(u0.input_tokens) * pr0[0] + num(u0.output_tokens) * pr0[1]) / 1e6, input: num(u0.input_tokens), output: num(u0.output_tokens), model: md0 }); }
   if (!data || !data.text) throw new Error('La IA no devolvió datos' + (data && data.stop ? ` (motivo: ${data.stop})` : '') + '. Revisa Supabase › Edge Functions › convertir-plan › Logs.');
   const md = String(data.model || ''); const pr = /opus/.test(md) ? API_PRICE['claude-opus-5-5'] : /haiku/.test(md) ? API_PRICE['claude-haiku-5-5'] : API_PRICE['claude-sonnet-5-5']; const u = data.usage || {};
   const usd = (num(u.input_tokens) * pr[0] + num(u.output_tokens) * pr[1]) / 1e6;
@@ -208,6 +211,8 @@ function normalizeImport(d) {
     monitoring: arrOf(pick(d, ['monitoreo', 'seguimiento'], [])).map(x => typeof x === 'string' ? { variable: x, freq: '', criterion: '' } : { variable: txt(pick(x, ['variable'])), freq: txt(pick(x, ['frecuencia'])), criterion: txt(pick(x, ['criterio', 'meta'])) }).filter(x => x.variable),
     labs: (() => { const l = pick(d, ['laboratorios', 'examenes']); if (!l) return null; if (Array.isArray(l)) return { tests: l.map(x => typeof x === 'string' ? x : txt(pick(x, ['examen', 'nombre']))).filter(Boolean), notes: '' }; return { tests: arrOf(pick(l, ['examenes', 'exámenes', 'lista'], [])).map(txt).filter(Boolean), notes: txt(pick(l, ['indicaciones', 'notas'], '')) }; })(),
     sections: arrOf(pick(d, ['secciones', 'anexos'], [])).map(x => ({ title: txt(pick(x, ['titulo', 'título'])), content: txt(pick(x, ['contenido', 'texto'])) })).filter(x => x.title || x.content),
+    habits: arrOf(pick(d, ['habitos', 'hábitos'], [])).map((x, i) => { const t = typeof x === 'string' ? x : txt(pick(x, ['habito', 'hábito', 'nombre', 'texto'])); const f = typeof x === 'string' ? 'Diario' : txt(pick(x, ['frecuencia'], 'Diario')); return t ? Object.assign({ k: habKey(t, i), text: t, freq: f }, parseFreq(f)) : null; }).filter(Boolean),
+    goals: arrOf(pick(d, ['metas'], [])).map((x, i) => ({ k: 'g' + i, variable: txt(pick(x, ['variable', 'nombre'])), start: anxNum(pick(x, ['inicial', 'valor_inicial'])), target: anxNum(pick(x, ['meta', 'objetivo'])), unit: txt(pick(x, ['unidad'])), date: isoDate(pick(x, ['fecha', 'fecha_limite'])), current: null })).filter(g => g.variable && String(g.target) !== ''),
     html: typeof d.documento_html === 'string' ? d.documento_html : ''
   };
 }
@@ -372,6 +377,7 @@ async function vImport(cid) {
   if (xl.length) h += `<div class="card"><h3>Ejercicios</h3>${xl.map(x => `<div class="imp-row">${x.id ? (x.st === 'ok' ? '<span class="st ok">✓</span>' : '<span class="st ap">≈</span>') : '<span class="st ap">+</span>'}<div><b>${esc(x.name)}</b><small>${x.id ? '→ ' + esc(exName(x.id)) : 'Se crea en la biblioteca' + (x.group ? ' (' + esc(x.group) + ')' : '')}</small></div><button class="btn sm" data-act="xPick" data-k="${esc(x.key)}">${x.id ? 'Cambiar' : 'Elegir'}</button></div>`).join('')}</div>`;
   if (d.alerts.length || d.summary) h += `<div class="card"><h3>Expediente</h3>${d.summary ? `<p class="small pre">${esc(d.summary.slice(0, 600))}${d.summary.length > 600 ? '…' : ''}</p>` : ''}${d.alerts.slice(0, 6).map(a => `<div class="alert-i ${esc(a.level)}"><b>${esc(a.title)}</b></div>`).join('')}${d.alerts.length > 6 ? `<p class="small muted">y ${d.alerts.length - 6} más.</p>` : ''}</div>`;
   h += `<div class="card"><h3>Qué aplicar</h3>
+      ${(d.habits || []).length || (d.goals || []).length ? `<p class="small">Se crean ${d.habits.length} ${d.habits.length === 1 ? 'hábito' : 'hábitos'} para marcar cada día y ${d.goals.length} ${d.goals.length === 1 ? 'meta' : 'metas'} con seguimiento.</p>` : ''}
       ${P && P.types.length ? chk('plan', 'Crear el plan nutricional' + (P.types.length > 1 ? ` con ${P.types.length} tipos de día` : '')) + (o.plan ? `<label class="check sub"><input type="checkbox" data-o="publish" ${o.publish ? 'checked' : ''}> Activarlo ahora (reemplaza el plan activo); si no, queda inactivo para revisarlo</label>` : '') : ''}
       ${chk('kase', 'Guardar el expediente: resumen, alertas, monitoreo, laboratorios y documento')}
       ${o.kase ? `<label class="check sub"><input type="checkbox" data-o="visible" ${o.visible ? 'checked' : ''}> Visible para el asesorado en «Mi plan integral»</label>` : ''}
@@ -473,7 +479,7 @@ async function applyImport(st, client, prog) {
     prog('Expediente…');
     const [rep] = await DB.insert('case_reports', {
       client_id: cid, title: d.title, report_date: d.date, summary: d.summary || null, visible: !!o.visible, plan_id: out.planId,
-      pending: o.ask ? d.pending : [], data: { indicators: d.indicators, alerts: d.alerts, favorables: d.favorables, monitoring: d.monitoring, labs: d.labs, sections: d.sections, supplements: d.supplements, competitions: d.competitions, goal: d.goal, plan_name: d.plan ? d.plan.name : '', pending_all: d.pending, hidden: [...(st.hidden || [])] }
+      pending: o.ask ? d.pending : [], data: { indicators: d.indicators, alerts: d.alerts, favorables: d.favorables, monitoring: d.monitoring, labs: d.labs, sections: d.sections, supplements: d.supplements, competitions: d.competitions, goal: d.goal, plan_name: d.plan ? d.plan.name : '', pending_all: d.pending, hidden: [...(st.hidden || [])], habits: d.habits || [], goals: d.goals || [], ai: st.ai || null }
     });
     out.reportId = rep.id;
     if (st.doc) { prog('Documento…'); await attachCaseDoc(rep, st.doc); }
@@ -553,6 +559,8 @@ async function tierOf(cid) { if (S.needsV6) return 'completo'; try { const m = (
 /* Bloques que se pueden ocultar, con su etiqueta */
 function caseBlocks(d, pend, hasDoc) {
   const b = [['resumen', 'Resumen y objetivo']];
+  if ((d.goals || []).length) b.push(['metas', 'Metas']);
+  if ((d.habits || []).length) b.push(['habitos', 'Hábitos diarios']);
   if ((d.indicators || []).length) b.push(['indicadores', 'Indicadores']);
   if ((d.alerts || []).length) b.push(['alertas', 'Prioridades detectadas']);
   if ((d.favorables || []).length) b.push(['favorables', 'Factores favorables']);
@@ -576,6 +584,7 @@ function clientCase(rep) {
   const H = new Set(((rep.data || {}).hidden) || []); if (!H.size) return rep;
   const d = Object.assign({}, rep.data || {});
   if (H.has('resumen')) d.goal = ''; if (H.has('indicadores')) d.indicators = []; if (H.has('alertas')) d.alerts = []; if (H.has('favorables')) d.favorables = [];
+  if (H.has('habitos')) d.habits = []; if (H.has('metas')) d.goals = [];
   if (H.has('monitoreo')) d.monitoring = []; if (H.has('laboratorios')) d.labs = null; if (H.has('suplementos')) d.supplements = [];
   d.sections = (d.sections || []).filter((s, i) => !H.has('sec' + i));
   return Object.assign({}, rep, { data: d, summary: H.has('resumen') ? null : rep.summary, pending: H.has('preguntas') ? [] : rep.pending, doc_path: H.has('documento') ? null : rep.doc_path });
@@ -605,6 +614,8 @@ function caseDocHtml(rep0, client, logo, ans) {
   let h = `<div class="doc-h">${logo ? `<img class="doc-logo" src="${esc(logo)}" alt="">` : ''}<div><h1>${esc(rep.title || 'Plan integral')}</h1><p><b>${esc(client.full_name || '')}</b>${d.plan_name ? ' · ' + esc(d.plan_name) : ''}</p><p class="doc-sub">${esc(BRAND.name)} · ${esc(fmtDateLong(rep.report_date))}</p></div></div>`;
   if (d.goal) h += `<p><b>Objetivo:</b> ${esc(d.goal)}</p>`;
   if (rep.summary) h += `<h2>Resumen</h2><p class="pre">${esc(rep.summary)}</p>`;
+  if ((d.goals || []).length) h += `<h2>Metas</h2><table class="doc-t"><thead><tr><th>Variable</th><th class="n">Inicio</th><th class="n">Meta</th><th>Fecha</th></tr></thead><tbody>${d.goals.map(g => `<tr><td>${esc(g.variable)}</td><td class="n">${esc(fmtN(g.start))} ${esc(g.unit || '')}</td><td class="n">${esc(fmtN(g.target))} ${esc(g.unit || '')}</td><td>${g.date ? esc(fmtDateLong(g.date)) : '—'}</td></tr>`).join('')}</tbody></table>`;
+  if ((d.habits || []).length) h += `<h2>Hábitos diarios</h2><table class="doc-t"><thead><tr><th>Hábito</th><th>Frecuencia</th></tr></thead><tbody>${d.habits.map(x => `<tr><td>${esc(x.text)}</td><td>${esc(freqText(x))}</td></tr>`).join('')}</tbody></table><p class="doc-sub">Se marcan cada día en la pantalla Hoy de la aplicación.</p>`;
   if ((d.indicators || []).length) h += `<h2>Indicadores</h2><table class="doc-t"><thead><tr><th>Indicador</th><th class="n">Valor</th><th>Referencia</th></tr></thead><tbody>${d.indicators.map(x => `<tr><td>${esc(x.name)}</td><td class="n">${esc(x.value)} ${esc(x.unit || '')}</td><td>${esc(x.ref || '')}</td></tr>`).join('')}</tbody></table>`;
   if ((d.alerts || []).length) h += `<h2>Prioridades</h2><table class="doc-t"><thead><tr><th>Prioridad</th><th>Hallazgo</th></tr></thead><tbody>${d.alerts.map(a => `<tr><td><b>${esc(LVL[a.level] || a.level)}</b></td><td><b>${esc(a.title)}</b>${a.detail ? `<br>${esc(a.detail)}` : ''}</td></tr>`).join('')}</tbody></table>`;
   if ((d.favorables || []).length) h += `<p><b>Factores favorables:</b> ${d.favorables.map(esc).join('; ')}.</p>`;
@@ -647,6 +658,7 @@ async function caseView(cid, sub, coach) {
       ${rep.summary ? `<p class="small pre">${esc(rep.summary)}</p>` : ''}
       <div class="row-btns">${rep.doc_path ? `<button class="btn sm primary" data-act="cDoc" data-id="${rep.id}">Documento completo (${rep.doc_type === 'pdf' ? 'PDF' : 'HTML'})</button>` : ''}${plan ? `<a class="btn sm" href="#/plan-ver/${plan.id}">Plan nutricional</a>` : ''}<button class="btn sm" data-act="cPdf" data-id="${rep.id}">Expediente PDF</button><button class="btn sm" data-act="cHtml" data-id="${rep.id}">Expediente HTML</button></div>
       ${coach ? `<div class="row-btns"><button class="btn sm" data-act="cVis" data-id="${rep.id}">${rep.visible ? 'Ocultar al asesorado' : 'Mostrar al asesorado'}</button><label class="btn sm">${rep.doc_path ? 'Reemplazar documento' : 'Adjuntar documento'}<input type="file" data-cfile="${rep.id}" accept=".pdf,.html,.htm,application/pdf,text/html" hidden></label><button class="btn sm danger-outline" data-act="cDel" data-id="${rep.id}">Eliminar</button></div>` : ''}</div>`;
+  if (typeof habitsGoalsBlocksHtml === 'function') h += habitsGoalsBlocksHtml(rep, await habitGoalCtx(cid, rep), coach);
   h += caseBlocksHtml(rep, a, coach);
   return { html: h, click: caseHandlers(cid, client, reps, ans, coach), change: t => { if (t.dataset.cfile && t.files[0]) { const f = t.files[0]; const r = reps.find(x => x.id === t.dataset.cfile); attachCaseDoc(r, { type: /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name) ? 'pdf' : 'html', name: f.name, file: f }).then(() => { toast('Documento guardado'); route(); }).catch(e => toast(errMsg(e), 'error')); return true; } return false; } };
 }
@@ -654,6 +666,7 @@ function caseHandlers(cid, client, reps, ans, coach) {
   const R = id => reps.find(r => r.id === id);
   const docs = id => reportDocButtons(docSafe(`Expediente - ${client.full_name || ''} - ${R(id).report_date}`), logo => caseDocHtml(R(id), client, logo, ans.find(x => x.report_id === id)));
   return {
+    ...(coach && typeof habitGoalHandlers === 'function' ? habitGoalHandlers(reps) : {}),
     pkg: async el => { el.disabled = true; try { downloadFile(docSafe(`Paquete de análisis - ${client.full_name}`) + '.md', await analysisPackage(cid), 'text/markdown'); } finally { el.disabled = false; } },
     pkgCopy: async el => { el.disabled = true; try { await copyText(await analysisPackage(cid)); toast('Paquete copiado'); } finally { el.disabled = false; } },
     guide: () => downloadFile('Instrucciones IA - Deuce Point.md', aiGuideFile(), 'text/markdown'),
@@ -726,6 +739,8 @@ INDICADOR: nombre | valor | unidad | referencia
 ALERTA: Alta, Media o Baja | título | hallazgo y acción
 FAVORABLE: factor; factor; factor
 PENDIENTE: pregunta para el asesorado | motivo
+HABITO: acción concreta para el asesorado | frecuencia (Diario; días: Lunes, Jueves; o «3 por semana»)
+META: variable | valor inicial | meta | unidad | fecha límite
 PLAN: nombre del plan | agua base ml | indicaciones generales
 TIPO: código | nombre | días | kcal | proteína g | carbohidratos g | grasa g | agua ml | indicaciones del tipo de día
 COMIDA: hora | nombre | indicaciones
@@ -750,6 +765,8 @@ SECCION: título | texto
 - Gramos del alimento en el estado del nombre (cocido o crudo). Líquidos: gramos = ml. Huevo: 50 g por unidad (anotar las unidades en la nota).
 - Rotaciones (por ejemplo, la proteína de la cena según el día): una OPCION por rotación con sus días. Variaciones (con o sin whey): una OPCION por variación; la primera es la recomendada.
 - Nombres de alimentos: los del catálogo de la aplicación cuando exista equivalente. Los que no estén: una línea ALIMENTO_NUEVO con la composición por 100 g y la categoría (Proteínas, Lácteos, Cereales y tubérculos, Leguminosas, Frutas, Verduras, Grasas, Suplementos, Bebidas, Dulces y otros).
+- HABITO: instrucciones que el asesorado marca cada día en la aplicación, redactadas como acción verificable («Acostarse a las 21:15», «Tomar la bebida de panela durante la sesión», «Toma de proteína antes de dormir»). Entre 3 y 6 hábitos, los de mayor impacto según las prioridades.
+- META: resultados medibles con valor inicial y meta. Con las variables peso, cintura, % grasa, pasos, agua, cumplimiento del plan o hábitos, la aplicación calcula el avance con los registros del asesorado; las demás se actualizan manualmente.
 - FECHA_ESPECIAL: taper, carga de carbohidratos, competencia o progresión (por ejemplo 80 % de las porciones de carbohidratos la primera semana).
 - SECCION: lo que no tiene etiqueta propia (protocolo de competencia, taper, preparación en lote, mercado y costo, hidratación).
 - RUTINA, SESION y EJERCICIO solo si el plan define el entrenamiento.
@@ -767,6 +784,11 @@ INDICADOR: Disponibilidad energética actual | 9,0 | kcal/kg MLG | < 30 riesgo; 
 ALERTA: Alta | Baja disponibilidad energética | Ingesta de 1.350 kcal frente a un gasto de 3.000 kcal. Aumentar a 2.800–3.100 kcal.
 FAVORABLE: Ciclo regular; prepara sus comidas; creatina 5 g/día
 PENDIENTE: Hora de salida de la competencia | Horario de comidas del día de la competencia
+HABITO: Acostarse a las 21:15 | Domingo, Lunes, Martes, Miércoles, Jueves, Viernes
+HABITO: Bebida de panela durante la sesión | Lunes, Martes, Miércoles, Jueves, Viernes, Sábado
+HABITO: Toma de proteína antes de dormir | Diario
+META: Peso | 63,4 | 64,5 | kg | 2026-11-27
+META: Cumplimiento del plan | 0 | 85 | % | 2026-11-27
 PLAN: Plan competencia · noviembre | 3000 | Porciones en gramos de alimento cocido, excepto avena cruda.
 TIPO: A | Doble sesión | Martes, Jueves | 3106 | 128 | 503 | 66 | 4000 | Bebida de panela durante la sesión.
 COMIDA: 04:45 | Desayuno | Huevos con 5 ml de aceite.
@@ -874,6 +896,12 @@ async function analysisPackage(cid) {
     const reps = await casesOf(cid); const ans = await answersFor(reps.map(r => r.id));
     const rows = reps.flatMap(r => { const a = ans.find(x => x.report_id === r.id); return a ? a.answers.filter(x => x.a).map(x => `- (${r.report_date}) ${x.q}: ${x.a}`) : []; });
     if (rows.length) add(`\n## Respuestas a las preguntas pendientes\n` + rows.join('\n'));
+    const hgRep = reps.find(r => ((r.data || {}).habits || []).length || ((r.data || {}).goals || []).length);
+    if (hgRep && typeof habitGoalCtx === 'function') {
+      const ctx = await habitGoalCtx(cid, hgRep); const hs = hgRep.data.habits || [], gs = hgRep.data.goals || [];
+      if (hs.length) add(`\n## Hábitos asignados (cumplimiento de los últimos 7 días)\n` + hs.map(x => { const p = ctx.habitPct(x); return `- ${x.text} (${freqText(x)}): ${p == null ? 'sin datos' : p + ' %'}`; }).join('\n'));
+      if (gs.length) add(`\n## Metas\n` + gs.map(g => { const s = goalState(g, ctx); return `- ${g.variable}: inicio ${fmtG(num(g.start))}, actual ${fmtG(s.cur)}, meta ${fmtG(num(g.target))} ${g.unit || ''}${g.date ? ' al ' + g.date : ''}${s.p != null ? ` (${Math.round(s.p * 100)} % del camino)` : ''}`; }).join('\n'));
+    }
     if (reps[0]) add(`\n## Último expediente: ${reps[0].title} (${reps[0].report_date})\n${reps[0].summary ? reps[0].summary.slice(0, 1500) : ''}`);
   }
   add('\n' + catalogMd(true));

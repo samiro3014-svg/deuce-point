@@ -305,7 +305,7 @@ function renderNav() {
   const items = isCoach()
     ? [['asesorados', 'Asesorados', 'users'], ['plantillas', 'Plantillas', 'tpl'], ['biblioteca', 'Biblioteca', 'book'], ['perfil', 'Perfil', 'user']]
     : isStaff() ? [['asesorados', 'Asesorados', 'users'], ['perfil', 'Perfil', 'user']]
-    : [['hoy', 'Hoy', 'hoy'], ['plan', 'Entreno', 'dumb'], ['historial', 'Progreso', 'prog'], ['perfil', 'Perfil', 'user']].filter(x => x[0] !== 'plan' || typeof showsTraining !== 'function' || showsTraining());
+    : [['hoy', 'Hoy', 'hoy'], ...(S.needsV7 ? [] : [['expediente', 'Mi plan', 'tpl']]), ['plan', 'Entreno', 'dumb'], ['historial', 'Progreso', 'prog'], ['perfil', 'Perfil', 'user']].filter(x => x[0] !== 'plan' || typeof showsTraining !== 'function' || showsTraining());
   document.getElementById('nav').innerHTML = items.map(([k, l, i]) => `<a href="#/${k}" data-nav="${k}">${svg(i)}<span>${l}</span></a>`).join('');
   document.getElementById('demo-flag').hidden = !DEMO;
 }
@@ -335,7 +335,7 @@ async function route() {
     if (coach) {
       if (!isCoach() && ['ajustes', 'negocio', 'plantillas', 'biblioteca', 'ejercicio', 'alimentos', 'alimento', 'videos', 'rutina', 'plan-nutri', 'lecciones-admin'].includes(name)) return paint('<div class="card"><p>Esta sección está disponible solo para el entrenador.</p><a class="btn" href="#/asesorados">Volver</a></div>');
       if (name === 'negocio') return await vNegocio(a);
-      if (name === 'asesorado') return await vAsesorado(a, b || 'rutinas', c);
+      if (name === 'asesorado') return await vAsesorado(a, b || (S.needsV7 ? 'rutinas' : 'expediente'), c);
       if (name === 'rutina') return await vRutina(a);
       if (name === 'plantillas') return await vPlantillas();
       if (name === 'biblioteca') return vBiblioteca();
@@ -984,12 +984,20 @@ async function vAsesorado(id, tab, sub) {
   const base = '#/asesorado/' + id;
   const mh = typeof membershipHead === 'function' && isCoach() ? await membershipHead(c) : { html: '', click: {} };
   if (typeof exportClientXlsx === 'function') { mh.html += `<div class="row-btns"><button class="btn sm" data-act="xlsC">Exportar ficha a Excel</button></div>`; mh.click.xlsC = async el => { el.disabled = true; try { await exportClientXlsx(c.id); } finally { el.disabled = false; } }; }
-  const tabs = `<div class="chips scroll tabs2">${[['valoracion', 'Valoración'], ['rutinas', 'Entreno'], ['nutricion', 'Nutrición'], ['seguimiento', 'Seguimiento'], ['mensajes', 'Mensajes'], ['checkins', 'Check-ins'], ['rendimiento', 'Rendimiento'], ['antropometria', 'Antropometría'], ['suplementos', 'Suplementos'], ['informes', 'Informes'], ...(S.needsV7 ? [] : [['expediente', 'Expediente']]), ['fotos', 'Fotos'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios']].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>`;
+  // Pestañas agrupadas: Expediente · Plan · Seguimiento · Mensajes
+  const GROUPS = [
+    ['Expediente', [...(S.needsV7 ? [] : [['expediente', 'Expediente']]), ['valoracion', 'Valoración'], ['informes', 'Informes mensuales']]],
+    ['Plan', [['nutricion', 'Nutrición'], ['rutinas', 'Entreno'], ['suplementos', 'Suplementos']]],
+    ['Seguimiento', [['seguimiento', 'Nutrición y peso'], ['checkins', 'Check-ins'], ['rendimiento', 'Rendimiento'], ['antropometria', 'Antropometría'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios'], ['fotos', 'Fotos']]],
+    ['Mensajes', [['mensajes', 'Mensajes']]]];
+  const grp = GROUPS.find(g => g[1].some(x => x[0] === tab)) || GROUPS[1];
+  const tabs = `<div class="seg tabs-g">${GROUPS.map(g => `<a class="${g === grp ? 'on' : ''}" href="${base}/${g[1][0][0]}">${g[0]}</a>`).join('')}</div>
+    ${grp[1].length > 1 ? `<div class="chips scroll tabs2">${grp[1].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>` : ''}`;
   const head = `<div class="card"><div class="day-h"><p class="small muted">${esc(c.email || '')}${c.phone ? ' · ' + esc(c.phone) : ''}</p>${waBtn(c.phone, `Hola ${firstName(c.full_name)}, `)}</div>
     <label class="field"><span>Objetivo del asesorado</span><textarea class="input" rows="2" data-goal placeholder="Ej.: Tenista juvenil · fuerza y potencia para la temporada">${esc(c.goal || '')}</textarea></label>
-    ${mh.html}</div>`;
+    ${mh.html}${isCoach() && typeof modulesCardHtml === 'function' ? modulesCardHtml(c.id) : ''}</div>`;
   let body = '';
-  const handlers = { click: Object.assign({}, mh.click), change: async t => { if ('goal' in t.dataset) { await DB.update('profiles', id, { goal: t.value.trim() }); toast('Objetivo guardado'); } } };
+  const handlers = { click: Object.assign({}, mh.click, typeof modulesHandlers === 'function' ? modulesHandlers() : {}), change: async t => { if ('goal' in t.dataset) { await DB.update('profiles', id, { goal: t.value.trim() }); toast('Objetivo guardado'); } } };
 
   let after = null;
   const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab, informes: typeof coachInformesTab === 'function' ? coachInformesTab : null, rendimiento: typeof rendimientoTab === 'function' ? (cid, s) => rendimientoTab(cid, s, base + '/rendimiento') : null, antropometria: typeof antropometriaTab === 'function' ? antropometriaTab : null, suplementos: typeof suplementosTab === 'function' ? suplementosTab : null, mensajes: typeof chatTab === 'function' ? chatTab : null, expediente: typeof expedienteTab === 'function' ? expedienteTab : null };
