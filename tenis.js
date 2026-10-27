@@ -388,8 +388,12 @@ async function tennisKcal(cid, date) {
     const rows = await DB.select('tennis_sessions', { eq: { client_id: cid, log_date: date } }); if (!rows.length) return { kcal: 0, rows };
     const w = await latestWeight(cid); const info = await clientInfo(cid);
     const assumed = SPORT_N[info.d.sesiones_deporte] || 0;
-    const gross = rows.reduce((a, t) => a + (t.kind === 'Partido' ? 8 : 7) * w * num(t.minutes) / 60, 0);
-    return { kcal: Math.round(gross * Math.max(0, 1 - assumed / 7) / 10) * 10, gross: Math.round(gross / 10) * 10, assumed, rows };
+    // MET por actividad; la parte de tenis descuenta las sesiones que el plan ya supone por semana
+    const met = t => typeof actMet === 'function' ? actMet(t.kind) : (t.kind === 'Partido' ? 8 : 7);
+    const isTen = t => t.kind === 'Partido' || t.kind === 'Práctica';
+    const gTen = rows.filter(isTen).reduce((a, t) => a + met(t) * w * num(t.minutes) / 60, 0), gOth = rows.filter(t => !isTen(t)).reduce((a, t) => a + met(t) * w * num(t.minutes) / 60, 0);
+    const gross = gTen + gOth;
+    return { kcal: Math.round((gTen * Math.max(0, 1 - assumed / 7) + gOth) / 10) * 10, gross: Math.round(gross / 10) * 10, assumed, rows };
   } catch (e) { return { kcal: 0, rows: [] }; }
 }
 async function rendTorneos(cid, info) {

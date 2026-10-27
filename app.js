@@ -65,8 +65,8 @@ function matchRow(row, o) {
 }
 const CASCADE = {
   routines: [['routine_days', 'routine_id']], routine_days: [['routine_exercises', 'day_id']], workouts: [['workout_sets', 'workout_id']],
-  nutrition_plans: [['plan_meals', 'plan_id'], ['nutrition_plans', 'variant_of']], case_reports: [['case_answers', 'report_id']], plan_meals: [['plan_options', 'meal_id']], plan_options: [['plan_items', 'option_id']],
-  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id'], ['tennis_sessions', 'client_id'], ['wellness', 'client_id'], ['tournaments', 'client_id'], ['sweat_tests', 'client_id'], ['fitness_tests', 'client_id'], ['pain_reports', 'client_id'], ['anthropometry', 'client_id'], ['supplement_plans', 'client_id'], ['supplement_logs', 'client_id'], ['cycle_logs', 'client_id'], ['messages', 'client_id'], ['lesson_reads', 'client_id'], ['challenge_members', 'client_id'], ['payments', 'client_id'], ['surveys', 'client_id'], ['push_subscriptions', 'user_id'], ['reminder_prefs', 'user_id'], ['case_reports', 'client_id'], ['case_answers', 'client_id']]
+  nutrition_plans: [['plan_meals', 'plan_id'], ['nutrition_plans', 'variant_of']], saved_meals: [], coach_notes: [], questionnaires: [], case_reports: [['case_answers', 'report_id']], plan_meals: [['plan_options', 'meal_id']], plan_options: [['plan_items', 'option_id']],
+  profiles: [['routines', 'client_id'], ['workouts', 'client_id'], ['nutrition_plans', 'client_id'], ['food_logs', 'client_id'], ['daily_logs', 'client_id'], ['body_logs', 'client_id'], ['intakes', 'client_id'], ['checkins', 'client_id'], ['progress_photos', 'client_id'], ['photo_vaults', 'owner_id'], ['memberships', 'client_id'], ['reports', 'client_id'], ['tennis_sessions', 'client_id'], ['wellness', 'client_id'], ['tournaments', 'client_id'], ['sweat_tests', 'client_id'], ['fitness_tests', 'client_id'], ['pain_reports', 'client_id'], ['anthropometry', 'client_id'], ['supplement_plans', 'client_id'], ['supplement_logs', 'client_id'], ['cycle_logs', 'client_id'], ['messages', 'client_id'], ['lesson_reads', 'client_id'], ['challenge_members', 'client_id'], ['payments', 'client_id'], ['surveys', 'client_id'], ['push_subscriptions', 'user_id'], ['reminder_prefs', 'user_id'], ['case_reports', 'client_id'], ['case_answers', 'client_id'], ['saved_meals', 'client_id'], ['coach_notes', 'client_id'], ['questionnaires', 'client_id'], ['technique_videos', 'client_id'], ['client_meta', 'client_id'], ['client_prefs', 'client_id'], ['guardian_links', 'client_id']]
 };
 const RESTRICT = { exercises: [['routine_exercises', 'exercise_id'], ['workout_sets', 'exercise_id']], foods: [['plan_items', 'food_id']] };
 function cascadeDelete(d, table, id) {
@@ -314,7 +314,7 @@ function setActiveNav(name) {
   const coach = isStaff();
   const map = coach
     ? { '': 'asesorados', asesorado: 'asesorados', rutina: 'asesorados', resumen: 'asesorados', diario: 'asesorados', 'plan-nutri': 'asesorados', 'plan-ver': 'asesorados', compras: 'asesorados', ajustes: 'asesorados', informe: 'asesorados', negocio: 'asesorados', retos: 'perfil', ejercicio: 'biblioteca', 'lecciones-admin': 'biblioteca', leccion: 'biblioteca', alimentos: 'biblioteca', alimento: 'biblioteca', videos: 'biblioteca' }
-    : { '': 'hoy', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', fotos: 'historial', rendimiento: 'historial', 'plan-ver': 'hoy', compras: 'hoy', checkin: 'hoy', suplementos: 'hoy', fuera: 'hoy', mensajes: 'hoy', retos: 'hoy', logros: 'historial', lecciones: 'perfil', leccion: 'perfil', valoracion: 'perfil', informe: 'perfil', informes: 'perfil', recordatorios: 'perfil', encuesta: 'hoy' };
+    : { '': 'hoy', semana: 'hoy', competencia: 'hoy', tecnica: 'historial', cuestionario: 'expediente', acudientes: 'perfil', entreno: 'plan', resumen: 'historial', progreso: 'historial', cuerpo: 'historial', adherencia: 'historial', fotos: 'historial', rendimiento: 'historial', 'plan-ver': 'hoy', compras: 'hoy', checkin: 'hoy', suplementos: 'hoy', fuera: 'hoy', mensajes: 'hoy', retos: 'hoy', logros: 'historial', lecciones: 'perfil', leccion: 'perfil', valoracion: 'perfil', informe: 'perfil', informes: 'perfil', recordatorios: 'perfil', encuesta: 'hoy' };
   const key = map[name] ?? name;
   document.querySelectorAll('#nav a').forEach(a => a.classList.toggle('on', a.dataset.nav === key));
   const pill = document.getElementById('live-pill');
@@ -325,6 +325,8 @@ async function route() {
   if (!S.profile) return;
   clearInterval(S.tick); S.tick = null; closeModal();
   document.body.classList.remove('onboarding');
+  // Acciones desde una notificación: #/hoy?a=agua250
+  if ((location.hash || '').includes('?')) { const [h0, q0] = location.hash.split('?'); S.navAct = new URLSearchParams(q0).get('a'); history.replaceState(null, '', location.pathname + location.search + h0); }
   const parts = (location.hash || '#/').slice(1).split('/').filter(Boolean);
   const [name = '', a, b, c] = /^(access_token|type|error)/.test(parts[0] || '') ? [] : parts;
   setActiveNav(name);
@@ -365,6 +367,11 @@ async function route() {
     if (name === 'informe') return await vInforme(a, b, c);
     if (name === 'informes') return await vMisInformes();
     if (name === 'expediente') return await vMiExpediente(a);
+    if (name === 'semana' && typeof vSemana === 'function') return await vSemana();
+    if (name === 'competencia' && typeof vCompetencia === 'function') return await vCompetencia(a);
+    if (name === 'tecnica' && typeof vMisVideos === 'function') return await vMisVideos();
+    if (name === 'cuestionario' && typeof vCuestionario === 'function') return await vCuestionario(a);
+    if (name === 'acudientes' && typeof vAcudientes === 'function') return await vAcudientes();
     if (name === 'suplementos') return await vSuplementos();
     if (name === 'mensajes') return await vMensajes();
     if (name === 'encuesta') return vEncuesta();
@@ -544,6 +551,7 @@ async function startWorkout(dayId) {
     if (typeof taperInfo === 'function') { const tp = await taperInfo(S.profile.id).catch(() => null); if (tp) applyTaper(draft, tp); }
   }
   if (typeof activePains === 'function') draft.pains = (await activePains(S.profile.id)).map(p => ({ zone: p.zone, side: p.side, intensity: p.intensity }));
+  if (typeof readinessFor === 'function') draft.ready = await readinessFor(S.profile.id).catch(() => null);
   saveDraft(draft);
   location.hash = '#/entreno';
 }
@@ -555,6 +563,7 @@ async function attachPrevious(list) {
     const mine = sets.filter(s => s.exercise_id === e.exercise_id);
     if (!mine.length) { e.prev = []; continue; }
     const wid = mine[0].workout_id;
+    if (typeof e1rmOf === 'function') e.best = Math.max(0, ...mine.map(s => e1rmOf(num(s.weight_kg), num(s.reps))));
     e.prev = mine.filter(s => s.workout_id === wid).sort((a, b) => a.set_number - b.set_number).map(s => ({ w: num(s.weight_kg), r: s.reps }));
   }
 }
@@ -604,7 +613,7 @@ function exCard(e, ei) {
     <div class="ex-actions">
       <button class="btn sm" data-act="addSet" data-ei="${ei}">+ Serie</button>
       <button class="btn sm" data-act="delSet" data-ei="${ei}">− Serie</button>
-      <button class="btn sm accent" data-act="swap" data-ei="${ei}">Variantes</button>
+      <button class="btn sm accent" data-act="swap" data-ei="${ei}">Alternativas</button>${!S.needsV9 && typeof videoUploadModal === 'function' ? `<button class="btn sm" data-act="vid" data-ei="${ei}">Video</button>` : ''}
       <button class="btn sm" data-act="removeEx" data-ei="${ei}" aria-label="Quitar ejercicio">Quitar</button>
     </div>
   </div>`;
@@ -614,7 +623,7 @@ function vEntreno() {
   const d = getDraft();
   if (!d) { location.hash = '#/plan'; return; }
   S.curPains = d.pains || [];
-  const html = `${d.taper ? `<div class="warn-box small">${esc(d.taper)}</div>` : ''}
+  const html = `${d.taper ? `<div class="warn-box small">${esc(d.taper)}</div>` : ''}${typeof readyBannerHtml === 'function' ? readyBannerHtml(d) : ''}${typeof warmupHtml === 'function' ? warmupHtml(d) : ''}
     <div class="wk-head">
       <div class="wk-stats"><span><b id="wk-time">0:00</b><small>Duración</small></span><span><b id="wk-vol">0 kg</b><small>Volumen</small></span><span><b id="wk-sets">0</b><small>Series</small></span></div>
       <div class="row-btns"><button class="btn" data-act="iv" aria-label="Temporizador de intervalos">Intervalos</button><button class="btn primary" data-act="finish">Finalizar</button></div>
@@ -640,6 +649,7 @@ function vEntreno() {
           if (s.r === '' || num(s.r) <= 0) { toast('Indica las repeticiones de la serie', 'error'); return; }
           if (s.w === '') s.w = '0';
           s.done = true;
+          if (typeof prCheck === 'function') prCheck(e, s);
           const g = e.target && e.target.group;
           const mates = g ? dr.exercises.map((x, i) => ({ x, i })).filter(o => o.x.target && o.x.target.group === g) : [];
           const nextMate = mates.find(o => o.i > +el.dataset.ei) || null;
@@ -652,6 +662,9 @@ function vEntreno() {
       delSet: el => { const dr = getDraft(); const e = dr.exercises[+el.dataset.ei]; if (e.sets.length <= 1) return; if (e.sets[e.sets.length - 1].done && !confirm('La última serie ya está completada. ¿Eliminarla?')) return; e.sets.pop(); saveDraft(dr); vEntreno(); },
       removeEx: el => { if (!confirm('¿Quitar este ejercicio de la sesión?')) return; mut(dr => dr.exercises.splice(+el.dataset.ei, 1)); },
       swap: el => swapModal(+el.dataset.ei),
+      vid: el => videoUploadModal(getDraft().exercises[+el.dataset.ei].exercise_id),
+      ...(typeof readyHandlers === 'function' ? readyHandlers(vEntreno) : {}),
+      ...(typeof warmupHandlers === 'function' ? warmupHandlers(vEntreno) : {}),
       painAlt: el => {
         const ei = +el.dataset.ei; const base = S.exById[getDraft().exercises[ei].exercise_id];
         pickExercise('Alternativa sin carga en la zona', async id => { const dr = getDraft(); dr.exercises[ei].exercise_id = id; await attachPrevious([dr.exercises[ei]]); saveDraft(dr); vEntreno(); toast('Ejercicio sustituido'); }, { group: base && base.muscle_group, filter: x => !painFor(x.id, S.curPains) });
@@ -682,13 +695,15 @@ function swapModal(ei) {
   const d = getDraft(); const e = d.exercises[ei];
   const base = S.exById[e.original_id] || S.exById[e.exercise_id];
   const fam = base && base.family;
-  const alts = S.exercises.filter(x => fam && x.family === fam && x.id !== e.exercise_id);
+  const cur = S.exById[e.exercise_id] || {};
+  // Primero las alternativas con un equipo distinto al actual (máquina ocupada)
+  const alts = S.exercises.filter(x => fam && x.family === fam && x.id !== e.exercise_id).sort((a, b) => ((a.equipment || '') === (cur.equipment || '')) - ((b.equipment || '') === (cur.equipment || '')) || a.name.localeCompare(b.name, 'es'));
   const choose = async id => {
     const dr = getDraft(); const ex = dr.exercises[ei];
     ex.exercise_id = id; await attachPrevious([ex]); saveDraft(dr); closeModal(); vEntreno();
     toast('Ejercicio sustituido');
   };
-  modal(`${modalHead('Variantes')}
+  modal(`${modalHead('Alternativas')}
     <p class="small muted">Si la máquina está ocupada o no está disponible, elige una variante que trabaje el mismo patrón${fam ? ` (${esc(fam)})` : ''}.</p>
     ${e.original_id !== e.exercise_id ? `<button class="pick-item orig" data-act="pick" data-id="${esc(e.original_id)}"><b>Volver al original: ${esc(exName(e.original_id))}</b></button>` : ''}
     <div class="pick-list">${alts.map(x => `<button class="pick-item" data-act="pick" data-id="${x.id}"><b>${esc(x.name)}</b><small>${esc(x.equipment || '')}</small></button>`).join('') || '<p class="muted small">Este ejercicio no tiene variantes registradas.</p>'}</div>
@@ -918,8 +933,10 @@ function vPerfil() {
       <a class="card row-link" href="#/retos"><div><b>Retos</b><small class="muted">Retos grupales y tabla de posiciones</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/recordatorios"><div><b>Recordatorios y notificaciones</b><small class="muted">Calendario del celular y notificaciones push</small></div><span class="chev">›</span></a>
       <a class="card row-link" href="#/informes"><div><b>Informes mensuales</b><small class="muted">Tu progreso del mes en PDF y HTML</small></div><span class="chev">›</span></a>
+      ${S.needsV9 ? '' : `<a class="card row-link" href="#/tecnica"><div><b>Videos de técnica</b><small class="muted">Envía un video de un ejercicio y recibe correcciones</small></div><span class="chev">›</span></a>
+      <a class="card row-link" href="#/acudientes"><div><b>Acceso para acudientes</b><small class="muted">Enlace de solo lectura para padres o tutores</small></div><span class="chev">›</span></a>`}
       <div id="perfil-extra"></div>
-      <button class="btn block" data-act="xlsMe">Descargar mis datos (Excel)</button>
+      <div class="card"><h3>Mis datos</h3><p class="small muted">Copia de tu información registrada en la aplicación.</p><div class="row-btns">${typeof exportMyData === 'function' ? '<button class="btn sm" data-act="myPdf">PDF</button><button class="btn sm" data-act="myHtml">HTML</button>' : ''}<button class="btn sm" data-act="xlsMe">Excel</button></div></div>
       ${waBtn(S.settings.whatsapp, `Hola, soy ${p.full_name || ''}, asesorado de ${BRAND.name}.`, 'Escribir a mi entrenador por WhatsApp', 'btn block')}`
       : !isCoach() ? '<div id="perfil-extra"></div>' : `<a class="card row-link" href="#/negocio"><div><b>Panel de negocio</b><small class="muted">Ingresos, renovaciones, prospectos, referidos, encuestas y página de captación</small></div><span class="chev">›</span></a>
       <div id="perfil-extra"></div>
@@ -932,13 +949,15 @@ function vPerfil() {
     change: async t => { if (t.dataset.f) { await DB.update('profiles', p.id, { [t.dataset.f]: t.value.trim() }); S.profile[t.dataset.f] = t.value.trim(); toast('Guardado'); } },
     click: {
       out: async () => { await Auth.signOut(); S.profile = null; location.hash = ''; afterAuth(); },
+      myPdf: () => exportMyData('pdf'), myHtml: () => exportMyData('html'),
+      ...(typeof lookHandlers === 'object' ? lookHandlers : {}),
       xlsMe: async el => { el.disabled = true; try { await exportClientXlsx(p.id); } finally { el.disabled = false; } },
       ...(typeof referralHandlers === 'object' ? referralHandlers : {}),
       ...(typeof pushHandlers === 'function' ? pushHandlers(() => route()) : {}),
       reset: () => { if (!confirm('¿Restablecer todos los datos de demostración?')) return; localStorage.removeItem(DEMO_KEY); Object.keys(localStorage).filter(k => /^(ent_draft_|dp_)/.test(k)).forEach(k => localStorage.removeItem(k)); demoData = null; location.reload(); }
     }
   }, 'Perfil');
-  (async () => { const box = document.getElementById('perfil-extra'); if (!box) return; let h = ''; if (client) h += (typeof myMembershipCardHtml === 'function' ? await myMembershipCardHtml().catch(() => '') : '') + (typeof referralCardHtml === 'function' ? referralCardHtml() : ''); else if (typeof pushCardHtml === 'function') h += await pushCardHtml(); box.innerHTML = h; })();
+  (async () => { const box = document.getElementById('perfil-extra'); if (!box) return; let h = ''; if (client) h += (typeof myMembershipCardHtml === 'function' ? await myMembershipCardHtml().catch(() => '') : '') + (typeof referralCardHtml === 'function' ? referralCardHtml() : '') + (typeof consentCardHtml === 'function' ? await consentCardHtml().catch(() => '') : ''); else if (typeof pushCardHtml === 'function') h += await pushCardHtml(); if (typeof lookCardHtml === 'function') h += lookCardHtml(); box.innerHTML = h; })();
 }
 
 /* =====================================================================
@@ -958,12 +977,14 @@ async function vAsesorados() {
   recent.forEach(w => { if (!last[w.client_id]) last[w.client_id] = w; if (w.started_at >= since) wk[w.client_id] = (wk[w.client_id] || 0) + 1; });
   const withRoutine = new Set(routines.map(r => r.client_id));
   const withPlan = new Set(nplans.map(p => p.client_id));
+  const lights = typeof riskLights === 'function' ? await riskLights(listed).catch(() => ({})) : {};
+  const lt = id => lights[id] ? `<span class="light ${lights[id].cls}" title="${esc(lights[id].why)}"></span>` : '';
   const html = `${await inboxHtml(clients)}
     <div class="stats3"><div><b>${clients.length}</b><small>Asesorados</small></div><div><b>${Object.keys(wk).length}</b><small>Activos 7 días</small></div><div><b>${Object.values(wk).reduce((a, b) => a + b, 0)}</b><small>Sesiones 7 días</small></div></div>
     <input class="input" id="cf" placeholder="Buscar asesorado">
     ${archived.length ? `<div class="seg"><button class="${showArch ? '' : 'on'}" data-act="arch" data-v="0">Activos (${clients.length})</button><button class="${showArch ? 'on' : ''}" data-act="arch" data-v="1">Archivados (${archived.length})</button></div>` : ''}
     ${listed.length ? listed.map(c => { const st = typeof membStatus === 'function' ? membStatus(mem[c.id]) : null; return `<a class="card row-link cl-item" data-n="${esc(norm(c.full_name + ' ' + c.email))}" href="#/asesorado/${c.id}">
-      <div><b>${esc(c.full_name || c.email)}</b><small class="muted">${last[c.id] ? 'Última sesión ' + fmtDateShort(last[c.id].started_at) : 'Sin sesiones registradas'}${withRoutine.has(c.id) ? '' : ' · <span class="warn">sin rutina activa</span>'}${withPlan.has(c.id) ? '' : ' · <span class="warn">sin plan nutricional</span>'}${st && (st.expired || st.soon) ? ` · <span class="${st.expired ? 'bad' : 'warn'}">${esc(st.label.toLowerCase())}</span>` : ''}</small></div>
+      <div><b>${lt(c.id)}${esc(c.full_name || c.email)}</b>${lights[c.id] && lights[c.id].cls !== 'ok' ? `<small class="risk-why">${esc(lights[c.id].why)}</small>` : ''}<small class="muted">${last[c.id] ? 'Última sesión ' + fmtDateShort(last[c.id].started_at) : 'Sin sesiones registradas'}${withRoutine.has(c.id) ? '' : ' · <span class="warn">sin rutina activa</span>'}${withPlan.has(c.id) ? '' : ' · <span class="warn">sin plan nutricional</span>'}${st && (st.expired || st.soon) ? ` · <span class="${st.expired ? 'bad' : 'warn'}">${esc(st.label.toLowerCase())}</span>` : ''}</small></div>
       <span class="kpi">${wk[c.id] || 0}<small>7 días</small></span></a>`; }).join('')
       : '<div class="card empty"><p>Aún no hay asesorados registrados.</p></div>'}
     <div class="card"><h3>Añadir asesorados</h3><p class="small">Comparte el enlace de la app. Cada asesorado crea su cuenta, completa la valoración inicial y el sistema genera su plan nutricional y su rutina. Según tus ajustes, quedan en revisión en Pendientes o se publican automáticamente.</p>
@@ -972,6 +993,7 @@ async function vAsesorados() {
     input: t => { if (t.id === 'cf') { const q = norm(t.value); document.querySelectorAll('.cl-item').forEach(a => { a.hidden = q && !a.dataset.n.includes(q); }); } },
     click: {
       arch: el => { S.showArchived = el.dataset.v === '1'; route(); },
+      ...(typeof autoMsgHandlers === 'function' ? autoMsgHandlers() : {}),
       copy: async () => { const url = location.origin + location.pathname; try { await navigator.clipboard.writeText(url); toast('Enlace copiado'); } catch (e) { prompt('Copia este enlace:', url); } },
       ibPhase2: async el => { if (!confirm('¿Generar y publicar la Fase 2 de este asesorado? La Fase 1 quedará inactiva.')) return; el.disabled = true; const id = await generatePhase2(el.dataset.id); toast('Fase 2 publicada'); location.hash = '#/rutina/' + id; }
     }
@@ -986,21 +1008,22 @@ async function vAsesorado(id, tab, sub) {
   if (typeof exportClientXlsx === 'function') { mh.html += `<div class="row-btns"><button class="btn sm" data-act="xlsC">Exportar ficha a Excel</button></div>`; mh.click.xlsC = async el => { el.disabled = true; try { await exportClientXlsx(c.id); } finally { el.disabled = false; } }; }
   // Pestañas agrupadas: Expediente · Plan · Seguimiento · Mensajes
   const GROUPS = [
-    ['Expediente', [...(S.needsV7 ? [] : [['expediente', 'Expediente']]), ['valoracion', 'Valoración'], ['informes', 'Informes mensuales']]],
+    ['Expediente', [...(S.needsV7 ? [] : [['expediente', 'Expediente']]), ['valoracion', 'Valoración'], ...(S.needsV9 ? [] : [['cuestionarios', 'Cuestionarios'], ['notas', 'Notas privadas']]), ['informes', 'Informes mensuales']]],
     ['Plan', [['nutricion', 'Nutrición'], ['rutinas', 'Entreno'], ['suplementos', 'Suplementos']]],
-    ['Seguimiento', [['seguimiento', 'Nutrición y peso'], ['checkins', 'Check-ins'], ['rendimiento', 'Rendimiento'], ['antropometria', 'Antropometría'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios'], ['fotos', 'Fotos']]],
+    ['Seguimiento', [['seguimiento', 'Nutrición y peso'], ['checkins', 'Check-ins'], ['rendimiento', 'Rendimiento'], ['antropometria', 'Antropometría'], ['historial', 'Sesiones'], ['progreso', 'Ejercicios'], ...(S.needsV9 ? [] : [['videos', 'Videos']]), ['fotos', 'Fotos']]],
     ['Mensajes', [['mensajes', 'Mensajes']]]];
   const grp = GROUPS.find(g => g[1].some(x => x[0] === tab)) || GROUPS[1];
   const tabs = `<div class="seg tabs-g">${GROUPS.map(g => `<a class="${g === grp ? 'on' : ''}" href="${base}/${g[1][0][0]}">${g[0]}</a>`).join('')}</div>
     ${grp[1].length > 1 ? `<div class="chips scroll tabs2">${grp[1].map(([k, l]) => `<a class="chip${tab === k ? ' on' : ''}" href="${base}/${k}">${l}</a>`).join('')}</div>` : ''}`;
   const head = `<div class="card"><div class="day-h"><p class="small muted">${esc(c.email || '')}${c.phone ? ' · ' + esc(c.phone) : ''}</p>${waBtn(c.phone, `Hola ${firstName(c.full_name)}, `)}</div>
     <label class="field"><span>Objetivo del asesorado</span><textarea class="input" rows="2" data-goal placeholder="Ej.: Tenista juvenil · fuerza y potencia para la temporada">${esc(c.goal || '')}</textarea></label>
+    ${isCoach() && typeof nextReviewHtml === 'function' ? await nextReviewHtml(c.id) : ''}
     ${mh.html}${isCoach() && typeof modulesCardHtml === 'function' ? modulesCardHtml(c.id) : ''}</div>`;
   let body = '';
   const handlers = { click: Object.assign({}, mh.click, typeof modulesHandlers === 'function' ? modulesHandlers() : {}), change: async t => { if ('goal' in t.dataset) { await DB.update('profiles', id, { goal: t.value.trim() }); toast('Objetivo guardado'); } } };
 
   let after = null;
-  const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab, informes: typeof coachInformesTab === 'function' ? coachInformesTab : null, rendimiento: typeof rendimientoTab === 'function' ? (cid, s) => rendimientoTab(cid, s, base + '/rendimiento') : null, antropometria: typeof antropometriaTab === 'function' ? antropometriaTab : null, suplementos: typeof suplementosTab === 'function' ? suplementosTab : null, mensajes: typeof chatTab === 'function' ? chatTab : null, expediente: typeof expedienteTab === 'function' ? expedienteTab : null };
+  const MODS = { nutricion: coachNutriTab, seguimiento: coachSeguimientoTab, valoracion: coachValoracionTab, checkins: coachCheckinsTab, fotos: coachFotosTab, informes: typeof coachInformesTab === 'function' ? coachInformesTab : null, rendimiento: typeof rendimientoTab === 'function' ? (cid, s) => rendimientoTab(cid, s, base + '/rendimiento') : null, antropometria: typeof antropometriaTab === 'function' ? antropometriaTab : null, suplementos: typeof suplementosTab === 'function' ? suplementosTab : null, mensajes: typeof chatTab === 'function' ? chatTab : null, expediente: typeof expedienteTab === 'function' ? expedienteTab : null, notas: typeof coachNotesTab === 'function' ? coachNotesTab : null, cuestionarios: typeof coachQuestTab === 'function' ? coachQuestTab : null, videos: typeof coachVideosTab === 'function' ? coachVideosTab : null };
   if (tab === 'historial') body = await historialHtml(id);
   else if (MODS[tab]) {
     const r = await MODS[tab](id, sub);

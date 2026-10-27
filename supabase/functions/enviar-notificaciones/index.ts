@@ -15,6 +15,7 @@ const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SE
 webpush.setVapidDetails(Deno.env.get('VAPID_SUBJECT') || 'mailto:admin@example.com', Deno.env.get('VAPID_PUBLIC_KEY')!, Deno.env.get('VAPID_PRIVATE_KEY')!);
 
 const WINDOW = 6; // minutos: la tarea corre cada 5
+const SUPP_NAMES: Record<string, string> = { creatina: 'Creatina monohidratada', cafeina: 'Cafeína', betaalanina: 'Beta-alanina', nitratos: 'Nitratos (jugo de remolacha)', bicarbonato: 'Bicarbonato de sodio' };
 const DAYS_ES: Record<string, string> = { Monday: 'Lunes', Tuesday: 'Martes', Wednesday: 'Miércoles', Thursday: 'Jueves', Friday: 'Viernes', Saturday: 'Sábado', Sunday: 'Domingo' };
 const toMin = (s: string) => { const m = String(s || '').match(/(\d{1,2}):(\d{2})/); return m ? +m[1] * 60 + +m[2] : null; };
 function localNow(tz: string) {
@@ -72,14 +73,23 @@ Deno.serve(async () => {
               if (txt) body = txt.length > 230 ? txt.slice(0, 227) + '…' : txt;
             }
           }
-          await send(r.user_id, 'meal-' + name, now.date, { title: name, body, url: './#/hoy', tag: 'meal' });
+          await send(r.user_id, 'meal-' + name, now.date, { title: name, body, url: './#/hoy', tag: 'meal', actions: [{ action: 'hecha', title: 'Marcar como hecha' }, { action: 'ver', title: 'Ver menú' }], urls: { hecha: './#/hoy?a=comida:' + encodeURIComponent(name), ver: './#/hoy' } });
         }
       }
     }
-    if (p.water && p.water.on) for (const t of String(p.water.times || '').split(/[,;\s]+/)) if (isDue(now, toMin(t))) await send(r.user_id, 'water-' + t, now.date, { title: 'Agua', body: 'Toma un vaso de agua (250 ml) y regístralo en la app.', url: './#/hoy', tag: 'water' });
+    if (p.water && p.water.on) for (const t of String(p.water.times || '').split(/[,;\s]+/)) if (isDue(now, toMin(t))) await send(r.user_id, 'water-' + t, now.date, { title: 'Agua', body: 'Toma un vaso de agua (250 ml) y regístralo en la app.', url: './#/hoy', tag: 'water', actions: [{ action: 'agua', title: '+250 ml' }], urls: { agua: './#/hoy?a=agua250' } });
     if (p.train && p.train.on && (p.train.days || []).includes(now.weekday)) { const t = toMin(p.train.time); if (t != null && isDue(now, t - 30)) await send(r.user_id, 'train', now.date, { title: 'Entrenamiento en 30 minutos', body: 'Abre la sesión del día en Entreno y registra tus series.', url: './#/plan', tag: 'train' }); }
     if (p.checkin && p.checkin.on && p.checkin.day === now.weekday && isDue(now, toMin(p.checkin.time))) await send(r.user_id, 'checkin', now.date, { title: 'Check-in semanal', body: 'Pésate en ayunas y completa el check-in en la app.', url: './#/checkin', tag: 'checkin' });
     if (p.log && p.log.on && isDue(now, toMin(p.log.time))) await send(r.user_id, 'log', now.date, { title: 'Registro del día', body: 'Marca las comidas que consumiste hoy y el agua.', url: './#/hoy', tag: 'log' });
+    // Resumen semanal: domingo 18:30
+    if (p.weekly !== false && now.weekday === 'Domingo' && isDue(now, toMin('18:30'))) await send(r.user_id, 'weekly', now.date, { title: 'Tu resumen semanal', body: 'Revisa tu cumplimiento, tus hábitos y los tipos de día de la próxima semana.', url: './#/hoy', tag: 'weekly' });
+    // Suplementos con hora de recordatorio (v9)
+    const { data: sp } = await sb.from('supplement_plans').select('items').eq('client_id', r.user_id).maybeSingle();
+    for (const it of ((sp && sp.items) || []) as any[]) {
+      if (!it.hour || !isDue(now, toMin(it.hour))) continue;
+      const nm = it.name || SUPP_NAMES[it.key] || it.key;
+      await send(r.user_id, 'supp-' + it.key, now.date, { title: 'Suplemento', body: `${nm}${it.dose ? ': ' + it.dose : ''}`, url: './#/hoy', tag: 'supp-' + it.key, actions: [{ action: 'tomado', title: 'Tomado' }], urls: { tomado: './#/hoy?a=supp:' + encodeURIComponent(it.key) } });
+    }
   }
 
   // 2. Mensajes nuevos

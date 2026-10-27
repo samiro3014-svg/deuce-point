@@ -86,6 +86,7 @@ async function deleteClientFiles(cid) {
 async function deleteClient(c) {
   await deleteClientFiles(c.id);
   if (typeof deleteCaseFiles === 'function') await deleteCaseFiles(c.id);
+  if (typeof VidFiles === 'object' && !S.needsV9) for (const v of await DB.select('technique_videos', { eq: { client_id: c.id } }).catch(() => [])) await VidFiles.del(v.path).catch(() => { });
   if (DEMO) await DB.remove('profiles', c.id);
   else await DB.rpc('delete_client', { target: c.id });
 }

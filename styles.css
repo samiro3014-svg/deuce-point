@@ -516,3 +516,45 @@ details.mods summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 .gb-row small { font-size: 12px; }
 a.card.goals-c { display: block; color: inherit; text-decoration: none; }
 .card.habits h3 { margin: 0; }
+
+/* ---------- v9 · registro rápido, entrenamiento y seguimiento ---------- */
+.meals-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.meals-h h2 { margin: 0; }
+.seg.sm { margin: 0; padding: 2px; } .seg.sm > * { padding: 5px 10px; font-size: 12px; }
+.next-meal { border-left: 4px solid var(--accent); }
+.next-meal h3 { margin: 2px 0; }
+.tour-c { border: 1px solid var(--accent); background: rgba(111, 178, 50, .07); }
+.tour-c h3 { margin: 4px 0; }
+.quick-a h3 { margin: 0 0 6px; }
+.sm-h { font-size: 14px; margin: 14px 0 6px; color: var(--brand); }
+.pick-row { display: flex; align-items: center; gap: 6px; } .pick-row .pick-item { flex: 1; } .pick-row > div { flex: 1; }
+.tl-row { display: grid; grid-template-columns: 72px 1fr; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.tl-row b { color: var(--brand); }
+.cook { text-align: center; } .cook-s { font-size: 22px; line-height: 1.4; margin: 18px 0; text-align: left; }
+details.wu summary { cursor: pointer; } details.wu ol { padding-left: 18px; margin: 8px 0; }
+video.vid { width: 100%; max-height: 70vh; border-radius: 10px; background: #000; }
+.reply { background: var(--card2); border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+.cl-item .light { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+.risk-why { display: block; color: var(--warn); font-size: 12px; }
+.hb-t.two { height: 8px; margin: 3px 0; } .hb-f.prev { background: #9fb4c7; }
+.am-rule { border-top: 1px solid var(--line); padding: 8px 0; } .am-rule .seg { margin: 6px 0; }
+.note-c p { margin: 4px 0; }
+.qi p { margin: 0 0 6px; }
+.comp-c { border-left: 4px solid var(--brand); }
+.week-sum h3 { margin: 0; }
+html.big body { zoom: 1.12; }
+
+/* ---------- modo oscuro ---------- */
+html.dark { --bg: #0e1620; --card: #16212d; --card2: #1e2b39; --line: #2b3b4c; --text: #e4ebf2; --muted: #9aabba; --brand: #3a86c8; --warn: #e3a440; color-scheme: dark; }
+html.dark header.top { background: rgba(22, 33, 45, .95); }
+html.dark #nav { background: rgba(22, 33, 45, .97); }
+html.dark .input, html.dark .opt-ed > .day-ed-h .input, html.dark .pi { background: var(--card2); color: var(--text); }
+html.dark .warn-box { background: #33270f; border-color: #6b5320; color: #f0d9a8; }
+html.dark .badge.warnb, html.dark .ib-tag.i, html.dark .flag.media { background: #33270f; color: #f0d9a8; }
+html.dark .badge.bad, html.dark .ib-tag.m, html.dark .flag.alta, html.dark .pain-w { background: #3a1a1c; color: #f3b7b9; }
+html.dark .ck-due { background: #1c2a17; }
+html.dark .iv.work { background: #1c2a17; } html.dark .iv.rest { background: #16283a; } html.dark .iv.prep { background: #33270f; } html.dark .iv.done { background: #1c2a17; }
+html.dark .modal-card { background: var(--card); color: var(--text); }
+html.dark .doc, html.dark .doc-x .doc { color-scheme: light; }
+html.dark a.card, html.dark .link-title { color: var(--text); }
+.chips.daytypes .chip { white-space: normal; text-align: left; max-width: 100%; }

@@ -371,6 +371,9 @@ async function vHoy(date, cid) {
   // Progresión por fechas: porcentaje de las porciones del grupo de carbohidratos
   const pf = ov && num(ov.f) > 0 && num(ov.f) !== 1 ? num(ov.f) : 1;
   if (pf !== 1 && plan) { const cg = carbGroupG(plan) * rf; rf *= pf; if (hasT) t = Object.assign({}, t, { carbs: Math.round(t.carbs - cg * (1 - pf)), kcal: Math.round(t.kcal - cg * (1 - pf) * 4) }); }
+  // Compensación de un evento social registrado en los días anteriores
+  const cmp = choices.__cmp && num(choices.__cmp.k) > 0 && plan ? choices.__cmp : null;
+  if (cmp) { const cg = carbGroupG(plan) * rf; if (cg > 0) rf *= Math.max(0.5, 1 - num(cmp.k) / (cg * 4)); if (hasT) t = Object.assign({}, t, { kcal: Math.round(t.kcal - num(cmp.k)), carbs: Math.round(t.carbs - num(cmp.k) / 4) }); }
   // Partidos y práctica de tenis: gasto adicional del día
   const tk = hasT && typeof tennisKcal === 'function' ? await tennisKcal(cid, date) : { kcal: 0, rows: [] };
   if ((tday && dayType === tday.type) || multi) tk.kcal = 0;   // en días de torneo la meta en g/kg ya cubre el partido; con tipos de día, el tipo ya incluye el gasto de la sesión
@@ -396,7 +399,7 @@ async function vHoy(date, cid) {
       ${pf !== 1 ? `<p class="small muted">${ov.n ? esc(ov.n) + '. ' : ''}Porciones de cereales, tubérculos y frutas al ${Math.round(pf * 100)} %; ya están ajustadas.</p>` : ''}
       ${tdayInfo ? `<p class="small muted">${esc(tdayInfo.t.name)}: ${tdayInfo.type === 'match' ? 'día de competencia' : 'víspera de la competencia'}. <a href="${own ? '#/rendimiento/torneos' : `#/asesorado/${cid}/rendimiento/torneos`}">Protocolo del día</a></p>` : ''}`;
   }
-  if (tk.rows.length) html += `<p class="small muted">Tenis hoy: ${tk.rows.map(r => `${r.kind.toLowerCase()} de ${r.minutes} min`).join(', ')} · gasto estimado ${fmtInt(tk.gross)} kcal${tk.kcal ? ` · +${fmtInt(tk.kcal)} kcal sumadas al objetivo (70 % carbohidratos, 30 % grasa)${tk.assumed ? `; el plan ya incluye ${String(tk.assumed).replace('.', ',')} sesiones por semana` : ''}` : tday && dayType === tday.type ? ' · cubierto por la meta de carbohidratos del día de torneo' : multi ? ' · incluido en las metas del tipo de día' : ''}.</p>`;
+  if (tk.rows.length) html += `<p class="small muted">Actividad hoy: ${tk.rows.map(r => `${r.kind.toLowerCase()} de ${r.minutes} min`).join(', ')} · gasto estimado ${fmtInt(tk.gross)} kcal${tk.kcal ? ` · +${fmtInt(tk.kcal)} kcal sumadas al objetivo (70 % carbohidratos, 30 % grasa)${tk.assumed ? `; el plan ya incluye ${String(tk.assumed).replace('.', ',')} sesiones por semana` : ''}` : tday && dayType === tday.type ? ' · cubierto por la meta de carbohidratos del día de torneo' : multi ? ' · incluido en las metas del tipo de día' : ''}.</p>`;
   if (own && isToday && S.profile.goal) html += `<div class="goal"><small>Objetivo</small>${esc(S.profile.goal)}</div>`;
   const mo = k => typeof modOn !== 'function' || modOn(k, cid);
   // Pendientes del día: se muestran arriba como máximo dos; el resto va al final
@@ -404,6 +407,8 @@ async function vHoy(date, cid) {
   if (own && isToday) {
     const tasks = [];
     if (typeof checkinCardsHtml === 'function' && !S.needsMigration) tasks.push(await checkinCardsHtml(cid).catch(() => ''));
+    if (typeof questCardHtml === 'function') tasks.push(await questCardHtml().catch(() => ''));
+    if (typeof nextReviewCardHtml === 'function' && !S.needsV9) tasks.push(await nextReviewCardHtml().catch(() => ''));
     if (typeof caseCardHtml === 'function') tasks.push(await caseCardHtml().catch(() => ''));
     if (typeof surveyCardHtml === 'function') tasks.push(await surveyCardHtml().catch(() => ''));
     if (typeof clientMembershipCard === 'function') tasks.push(await clientMembershipCard().catch(() => ''), await clientReportCard().catch(() => ''));
@@ -416,12 +421,20 @@ async function vHoy(date, cid) {
     <div><b>${hasT ? fmtInt(t.kcal) : '—'}</b><small>Objetivo</small></div></div>
     ${macroBars(tot, hasT ? t : null)}
   </div>`;
+  if (nut && cmp) html += `<p class="small muted">Compensación del evento «${esc(cmp.l || '')}» del ${esc(fmtDM(parseDay(cmp.from)))}: −${fmtInt(cmp.k)} kcal en cereales, tubérculos y frutas; las porciones ya están ajustadas.</p>`;
+  if (own && isToday && nut && plan) {
+    const tk3 = 'dp_tour_' + full.id;
+    if (typeof TOUR !== 'undefined' && !lsGet(tk3, '')) html += `<div class="card tour-c"><small class="muted">1 de ${TOUR.length}</small><h3>${esc(TOUR[0][0])}</h3><p class="small">${esc(TOUR[0][1])}</p><div class="row-btns"><button class="btn sm" data-act="tourX" data-k="${tk3}">Omitir</button><button class="btn sm primary" data-act="tourN" data-k="${tk3}" data-i="1">Siguiente</button></div></div>`;
+    html += '<!--NEXT-->';
+  }
   html += `<div class="card"><div class="mb-h"><span>Agua</span><span><b>${(water / 1000).toLocaleString('es-CO', { maximumFractionDigits: 2 })}</b> / ${(waterT / 1000).toLocaleString('es-CO', { maximumFractionDigits: 1 })} L</span></div>
     <div class="mb-t"><div class="mb-f w" style="width:${Math.min(100, water / waterT * 100).toFixed(1)}%"></div></div>
-    <div class="row-btns"><button class="btn sm" data-act="water" data-d="-250">− 250 ml</button><button class="btn sm primary" data-act="water" data-d="250">+ 250 ml</button><button class="btn sm" data-act="water" data-d="500">+ 500 ml</button></div>
+    <div class="row-btns"><button class="btn sm" data-act="water" data-d="-250">− 250 ml</button><button class="btn sm primary" data-act="water" data-d="250">+ 250 ml</button><button class="btn sm" data-act="water" data-d="500">+ 500 ml</button>${own ? (num(lsGet('dp_bottle', 0)) ? `<button class="btn sm" data-act="water" data-d="${num(lsGet('dp_bottle', 0))}">+ Botella ${fmtInt(num(lsGet('dp_bottle', 0)))} ml</button>` : '') + '<button class="linkbtn small" data-act="bottle">Mi botella</button>' : ''}</div>
     ${S.needsV6 || !mo('pasos') ? '' : `<label class="steps-in"><span>Pasos del día</span><input class="input" data-steps inputmode="numeric" value="${num(daily && daily.steps) || ''}" placeholder="0"></label>`}</div>`;
   if (own && typeof habitsCardHtml === 'function') html += await habitsCardHtml(date, daily).catch(() => '');
   if (own && isToday && typeof goalsCardHtml === 'function') html += await goalsCardHtml().catch(() => '');
+  if (own && isToday && typeof weeklyCardHtml === 'function') html += await weeklyCardHtml(cid, full).catch(() => '');
+  if (own && isToday && typeof competitionToday === 'function') { const ct = await competitionToday(cid).catch(() => null); if (ct) html += `<a class="card row-link comp-c" href="#/competencia/${ct.id}"><div><b>Modo competencia · ${esc(ct.name)}</b><small class="muted">${ct.start_date > todayStr() ? 'Mañana' : 'Hoy'}: protocolo con la hora de cada comida y alarmas</small></div><span class="chev">›</span></a>`; }
   if (own && isToday && typeof wellnessCardHtml === 'function' && mo('bienestar')) html += await wellnessCardHtml();
   if (own && isToday && (typeof showsTraining !== 'function' || showsTraining())) html += await workoutCardHtml(cid);
   if (own && isToday && typeof supplementCardHtml === 'function' && mo('suplementos')) html += await supplementCardHtml().catch(() => '');
@@ -436,14 +449,19 @@ async function vHoy(date, cid) {
   else if (!plan) html += `<div class="card empty"><p>${own ? (S.intake && S.intake.status === 'pending' ? 'Tu entrenador está revisando tu valoración y tu plan nutricional. Cuando lo apruebe aparecerá aquí.' : 'Tu entrenador todavía no te ha asignado un plan nutricional.') : 'Este asesorado no tiene un plan nutricional activo.'}</p><p class="small muted">Puedes registrar alimentos libremente en cada comida.</p></div>`;
   const meals = plan ? plan.meals : DEFAULT_MEALS.map(([n, tl]) => ({ id: null, name: n, time_label: tl, options: [] }));
   const used = new Set(); const itemMap = {};
-  const itemRow = (it0, meal, log) => {
+  const yLogs = own ? await DB.select('food_logs', { eq: { client_id: cid, log_date: addDays(date, -1) } }).catch(() => []) : [];
+  const repMap = choices.__rep || {}, pfMap = choices.__pf || {}, fbMap = choices.__fb || {};
+  const hand = typeof handOn === 'function' && handOn();
+  const mctx = [];
+  const itemRow = (it0, meal, log, pfm = 1) => {
     const f = foodOf(it0.food_id); if (!f) return '';
-    const it = rf !== 1 && isCarbFood(f) ? Object.assign({}, it0, { grams: Math.max(1, roundG(num(it0.grams) * rf)) }) : it0;
+    const fac = (rf !== 1 && isCarbFood(f) ? rf : 1) * pfm;
+    const it = fac !== 1 ? Object.assign({}, it0, { grams: Math.max(1, roundG(num(it0.grams) * fac)) }) : it0;
     itemMap[it.id] = { it, meal, log };
     const replaced = log && log.food_id !== it.food_id;
     const g = log ? num(log.grams) : num(it.grams);
     const kc = log ? num(log.kcal) : macrosFor(f, it.grams).kcal;
-    const ut = replaced ? unitText(foodOf(log.food_id), g) : unitText(f, g);
+    const ut = hand ? handText(replaced ? foodOf(log.food_id) : f, g) : replaced ? unitText(foodOf(log.food_id), g) : unitText(f, g);
     return `<div class="fi${log ? ' done' : ''}">
       <button class="chk" data-act="tick" data-item="${it.id}" aria-label="Marcar ${esc(f.name)}">✓</button>
       <button class="fi-b" data-act="repl" data-item="${it.id}"><b>${esc(replaced ? log.name : f.name)}</b>
@@ -453,35 +471,55 @@ async function vHoy(date, cid) {
   };
   const logRow = l => `<div class="fi done extra"><span class="chk">✓</span><div class="fi-b"><b>${esc(l.name)}</b><small>${l.grams ? fmtN(l.grams) + ' g · ' : ''}${macroLine(logM(l))}</small></div><button class="icon-btn danger" data-act="dellog" data-id="${l.id}" aria-label="Eliminar">✕</button></div>`;
   const mealByKey = {};
-  if (nut) html += meals.map((m, mi) => {
+  if (nut) html += (own && plan ? `<div class="meals-h"><h2 class="sec">Comidas</h2><div class="seg sm"><button class="${hand ? '' : 'on'}" data-act="handT" data-v="0">Gramos</button><button class="${hand ? 'on' : ''}" data-act="handT" data-v="1">Mano</button></div></div>` : '') + meals.map((m, mi) => {
     const mk = m.id || 'n' + mi; mealByKey[mk] = m;
     const mlogs = logs.filter(l => m.id ? l.meal_id === m.id : (!l.meal_id && l.meal_name === m.name));
     mlogs.forEach(l => used.add(l.id));
+    const rep = repMap[mk]; const pfm = num(pfMap[mk]) || 1; const fb = fbMap[mk];
     const opt = chosenOption(m, choices, date);
-    const ids = new Set(opt ? opt.items.map(i => i.id) : []);
+    const ids = new Set(opt && !rep ? opt.items.map(i => i.id) : []);
     const extras = mlogs.filter(l => !ids.has(l.plan_item_id));
     const mt = mlogs.reduce((a, l) => addM(a, logM(l)), ZERO());
-    const planned = opt && opt.items.length ? opt.items.reduce((a, i) => { const f = foodOf(i.food_id); return f ? addM(a, macrosFor(f, num(i.grams) * (rf !== 1 && isCarbFood(f) ? rf : 1))) : a; }, ZERO()) : null;
+    const plannedRows = opt ? opt.items.map(i => { const f = foodOf(i.food_id); return f ? { food: f, grams: num(i.grams) * (rf !== 1 && isCarbFood(f) ? rf : 1) * pfm, plan_item_id: i.id } : null; }).filter(Boolean) : [];
+    const planned = plannedRows.length ? plannedRows.reduce((a, r) => addM(a, macrosFor(r.food, r.grams)), ZERO()) : null;
     const periTag = peri ? (peri.pre === m.name ? 'Pre-entreno' : peri.post === m.name ? 'Post-entreno' : '') : '';
-    const pending = opt ? opt.items.filter(i => !mlogs.some(l => l.plan_item_id === i.id)).length : 0;
-    return `<div class="card meal">
-      <div class="meal-h"><div><h3>${esc(m.name)}${periTag ? ` <span class="tag peri">${periTag}</span>` : ''}</h3><small class="muted">${esc(m.time_label || '')}${planned ? (m.time_label ? ' · ' : '') + 'plan ' + fmtInt(planned.kcal) + ' kcal' : ''}</small></div><span class="kpi">${fmtInt(mt.kcal)}<small>kcal</small></span></div>
-      ${m.options.length > 1 ? `<div class="chips">${m.options.map(o => `<button class="chip${o === opt ? ' on' : ''}" data-act="opt" data-meal="${m.id}" data-opt="${o.id}">${esc(o.name)}</button>`).join('')}</div>` : ''}
-      ${m.instructions ? `<p class="note">${esc(m.instructions)}</p>` : ''}
-      ${opt ? opt.items.map(it => itemRow(it, m, mlogs.find(l => l.plan_item_id === it.id))).join('') : ''}
+    const pending = opt && !rep ? opt.items.filter(i => !mlogs.some(l => l.plan_item_id === i.id)).length : 0;
+    mctx.push({ mk, m, logs: mlogs, planned: plannedRows, plannedKcal: planned ? planned.kcal : 0, kcal: mlogs.length ? mt.kcal : planned ? planned.kcal : 0, pending, rep, planItems: opt ? opt.items.map(i => { const f = foodOf(i.food_id); return Object.assign({}, i, { baseGrams: num(i.grams) * (f && rf !== 1 && isCarbFood(f) ? rf : 1) }); }) : [] });
+    return `<div class="card meal" id="meal-${mk}">
+      <div class="meal-h"><div><h3>${esc(m.name)}${periTag ? ` <span class="tag peri">${periTag}</span>` : ''}</h3><small class="muted">${esc(m.time_label || '')}${planned ? (m.time_label ? ' · ' : '') + 'plan ' + fmtInt(planned.kcal) + ' kcal' : ''}${pfm !== 1 ? ` · porción ${Math.round(pfm * 100)} %` : ''}</small></div><span class="kpi">${fmtInt(mt.kcal)}<small>kcal</small></span></div>
+      ${rep ? `<p class="small swapped">Reemplazada: ${esc(rep.l || '')}</p>` : m.options.length > 1 ? `<div class="chips">${m.options.map(o => `<button class="chip${o === opt ? ' on' : ''}" data-act="opt" data-meal="${m.id}" data-opt="${o.id}">${esc(o.name)}</button>`).join('')}</div>` : ''}
+      ${m.instructions && !rep ? `<p class="note">${esc(m.instructions)}</p>` : ''}
+      ${opt && !rep ? opt.items.map(it => itemRow(it, m, mlogs.find(l => l.plan_item_id === it.id), pfm)).join('') : ''}
       ${extras.map(logRow).join('')}
-      <div class="row-btns">${pending ? `<button class="btn sm" data-act="all" data-meal="${mk}">Marcar todo</button>` : ''}<button class="btn sm" data-act="add" data-meal="${mk}">+ Añadir alimento</button>${opt && opt.items.length && typeof recipeModal === 'function' ? `<button class="btn sm" data-act="recipe" data-meal="${mk}">Preparación</button>` : ''}</div>
+      ${fb && (fb.s || fb.d) ? `<p class="small muted">${fb.s ? 'Saciedad ' + fb.s + '/5' : ''}${fb.s && fb.d ? ' · ' : ''}${fb.d ? 'Digestión: ' + esc(fb.d.toLowerCase()) : ''}</p>` : ''}
+      <div class="row-btns">${pending ? `<button class="btn sm" data-act="all" data-meal="${mk}">Marcar todo</button>` : ''}<button class="btn sm" data-act="add" data-meal="${mk}">+ Añadir</button>${opt && opt.items.length && !rep && typeof recipeModal === 'function' ? `<button class="btn sm" data-act="recipe" data-meal="${mk}">Preparación</button>` : ''}${own && typeof mealMoreModal === 'function' ? `<button class="btn sm" data-act="more" data-meal="${mk}">Más</button>` : ''}</div>
     </div>`;
   }).join('');
+  if (own && isToday && typeof nextMealCardHtml === 'function') html = html.replace('<!--NEXT-->', nextMealCardHtml(mctx)); else html = html.replace('<!--NEXT-->', '');
+  if (own && nut) html += `<div class="card quick-a"><h3>Acciones rápidas</h3>
+    ${choices.__off ? `<p class="small swapped">Avisaste que no pudiste seguir el plan: ${esc((choices.__off.r || []).join(', '))}${choices.__off.n ? ' · ' + esc(choices.__off.n) : ''}.</p>` : ''}
+    <div class="row-btns">${plan ? '<a class="btn sm" href="#/semana">Semana del plan</a>' : ''}${yLogs.length ? '<button class="btn sm" data-act="repY">Repetir el día de ayer</button>' : ''}${plan ? '<button class="btn sm" data-act="evt">Evento social</button>' : ''}<button class="btn sm" data-act="actv">+ Actividad</button><button class="btn sm" data-act="offP">${choices.__off ? 'Editar aviso' : 'No pude seguir el plan'}</button></div></div>`;
   const orphans = logs.filter(l => !used.has(l.id));
   if (nut && orphans.length) html += `<div class="card meal"><div class="meal-h"><h3>Otros registros</h3></div>${orphans.map(logRow).join('')}</div>`;
   if (nut && plan) html += `<div class="row-btns"><a class="btn" href="#/plan-ver/${full.id}">Ver plan completo</a><a class="btn" href="#/compras/${full.id}">Lista de compras</a>${own && typeof vFuera === 'function' ? '<a class="btn" href="#/fuera">Comer fuera de casa</a>' : ''}</div>`;
   html += tail;
 
+  if (own && isToday && S.navAct && typeof runNavAct === 'function') { if (await runNavAct({ cid, date, water, meals: mctx })) return rerender(); }
   paint(html, {
     change: async t => { if ('steps' in t.dataset) { await upsertDaily(cid, date, { steps: Math.max(0, Math.round(num(t.value))) }); toast('Pasos guardados'); } },
     click: {
       water: async el => { await upsertDaily(cid, date, { water_ml: Math.max(0, water + num(el.dataset.d)) }); rerender(); },
+      bottle: () => { const v = prompt('Capacidad de tu botella en ml (vacío para quitar):', lsGet('dp_bottle', '') || ''); if (v == null) return; lsSet('dp_bottle', String(Math.round(num(v)) || '')); rerender(); },
+      handT: el => { lsSet('dp_hand', el.dataset.v); rerender(); },
+      goMeal: el => { const t = document.getElementById('meal-' + el.dataset.meal); if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+      more: el => { const o = mctx.find(v => v.mk === el.dataset.meal); mealMoreModal({ cid, date, m: o.m, mk: o.mk, meals: mctx, mLogs: o.logs, yLogs, choices, plannedKcal: o.plannedKcal, planItems: o.planItems, hasPlan: !!plan, after: rerender }); },
+      repY: () => repeatYesterday({ cid, date, meals: mctx, yLogs, after: rerender }),
+      evt: () => eventModal(cid, full, rerender),
+      actv: () => activityModal(cid, date, rerender),
+      offP: () => offPlanModal(cid, date, choices, rerender),
+      weekX: el => { lsSet(el.dataset.k, 'x'); rerender(); },
+      tourN: el => { const i = +el.dataset.i; if (i >= TOUR.length) { lsSet(el.dataset.k, '1'); return rerender(); } const c = el.closest('.tour-c'); c.querySelector('h3').textContent = TOUR[i][0]; c.querySelector('p').textContent = TOUR[i][1]; c.querySelector('small').textContent = `${i + 1} de ${TOUR.length}`; el.dataset.i = i + 1; el.textContent = i === TOUR.length - 1 ? 'Empezar' : 'Siguiente'; },
+      tourX: el => { lsSet(el.dataset.k, '1'); rerender(); },
       ...(typeof wellnessHandlers === 'function' ? wellnessHandlers(rerender) : {}),
       ...(typeof supplementHandlers === 'function' ? supplementHandlers(rerender) : {}),
       ...(typeof cycleHandlers === 'function' ? cycleHandlers(rerender) : {}),
@@ -500,7 +538,7 @@ async function vHoy(date, cid) {
       },
       repl: el => { const x = itemMap[el.dataset.item]; replaceModal({ ...x, cid, date, after: rerender }); },
       all: async el => {
-        const m = mealByKey[el.dataset.meal];
+        const m = mealByKey[el.dataset.meal]; el.disabled = true;
         for (const x of Object.values(itemMap)) if (x.meal === m && !x.log) await logFood(cid, date, m, foodOf(x.it.food_id), x.it.grams, x.it.id);
         rerender();
       },
@@ -653,6 +691,7 @@ async function vPlanDoc(id) {
    Lista de compras
    ===================================================================== */
 async function vCompras(id, days) {
+  if (days === 'lote' && typeof vLote === 'function') return vLote(id);
   days = +days || 7;
   const plan = await loadPlanFull(id);
   if (!plan) return paint('<div class="card empty"><p>Plan no encontrado.</p></div>');
@@ -670,7 +709,7 @@ async function vCompras(id, days) {
   try { checked = JSON.parse(localStorage.getItem(key) || '{}'); } catch (e) { }
   let total = 0, noPrice = 0; const coachShop = S.profile.role === 'coach';
   const qty = g => g >= 1000 ? (Math.round(g / 100) / 10).toLocaleString('es-CO') + ' kg' : Math.round(g / 5) * 5 + ' g';
-  let html = `<div class="chips no-print">${[3, 7, 14].map(d => `<a class="chip${d === days ? ' on' : ''}" href="#/compras/${id}/${d}">${d} días</a>`).join('')}</div>
+  let html = `<div class="chips no-print"><a class="chip on" href="#/compras/${id}">Mercado</a>${typeof vLote === 'function' ? `<a class="chip" href="#/compras/${id}/lote">Preparación en lote</a>` : ''}</div><div class="chips no-print">${[3, 7, 14].map(d => `<a class="chip${d === days ? ' on' : ''}" href="#/compras/${id}/${d}">${d} días</a>`).join('')}</div>
     <p class="small muted">${esc(plan.name)}. Cantidades para ${days} días ${multi ? `desde hoy, según el tipo de día de cada fecha${hasDayTypes(plan) ? ' (' + dayVariants(plan).map(v => `${esc(v.day_code || dayLabel(v))}: ${dayTypeCounts(plan, todayStr(), days)[v.id] || 0}`).join(' · ') + ')' : ''} y las rotaciones por día de la semana` : 'con rotación equitativa de las opciones de cada comida'}. Los alimentos que el plan indica cocidos se convierten a peso en crudo aproximado.</p>`;
   for (const cat of FOOD_CATS) {
     const rows = Object.entries(agg).map(([fid, g]) => ({ f: foodOf(fid), g })).filter(x => x.f && x.f.category === cat).sort((a, b) => a.f.name.localeCompare(b.f.name, 'es'));
@@ -788,7 +827,8 @@ async function coachNutriTab(cid) {
 async function coachSeguimientoTab(cid) {
   const a = await adherenceSection(cid, d => `#/diario/${cid}/${d}`);
   const b = await bodySection(cid);
-  return { html: `<h2 class="sec">Nutrición · últimos 14 días</h2>${a.html}<h2 class="sec">Peso y medidas</h2>${b.html}`, click: b.click };
+  const ins = typeof eatingInsightsHtml === 'function' ? await eatingInsightsHtml(cid).catch(() => '') : '';
+  return { html: `<h2 class="sec">Nutrición · últimos 14 días</h2>${a.html}${ins ? '<h2 class="sec">Hábitos de alimentación</h2>' + ins : ''}<h2 class="sec">Peso y medidas</h2>${b.html}`, click: b.click };
 }
 
 async function templatePickModal(cid) {
@@ -930,6 +970,7 @@ async function vPlanEditor(id) {
         <input class="input time-in" data-tbl="plan_meals" data-id="${m.id}" data-f="time_label" value="${esc(m.time_label || '')}" placeholder="Hora">
         <button class="icon-btn" data-act="mvMeal" data-id="${m.id}" data-dir="-1" ${mi === 0 ? 'disabled' : ''} aria-label="Subir">↑</button>
         <button class="icon-btn" data-act="mvMeal" data-id="${m.id}" data-dir="1" ${mi === plan.meals.length - 1 ? 'disabled' : ''} aria-label="Bajar">↓</button>
+        <button class="icon-btn" data-act="cpMeal" data-id="${m.id}" aria-label="Copiar la comida en otra">⧉</button>
         <button class="icon-btn danger" data-act="delMeal" data-id="${m.id}" aria-label="Eliminar comida">✕</button></div>
       <textarea class="input" rows="2" data-tbl="plan_meals" data-id="${m.id}" data-f="instructions" placeholder="Instrucciones de la comida">${esc(m.instructions || '')}</textarea>
       <div class="chips">${m.options.map(o => `<button class="chip${o === sel ? ' on' : ''}" data-act="selOpt" data-meal="${m.id}" data-id="${o.id}">${esc(o.name)} · ${fmtInt(optionTotals(o).kcal)}</button>`).join('')}<button class="chip add" data-act="addOpt" data-meal="${m.id}" data-n="${m.options.length}">+ Opción</button>${typeof autoOptionFor === 'function' ? `<button class="chip add" data-act="autoOpt" data-meal="${m.id}" data-n="${m.options.length}">+ Opción automática</button>` : ''}</div>
@@ -1034,10 +1075,28 @@ async function vPlanEditor(id) {
       delItem: async el => { await DB.remove('plan_items', el.dataset.id); rerender(); },
       mvItem: el => { const o = findOpt(el.dataset.opt); return reorder('plan_items', o.items.slice(), o.items.findIndex(i => i.id === el.dataset.id), +el.dataset.dir); },
       mvMeal: el => reorder('plan_meals', plan.meals.slice(), plan.meals.findIndex(m => m.id === el.dataset.id), +el.dataset.dir),
+      cpMeal: el => {
+        const src = plan.meals.find(x => x.id === el.dataset.id);
+        modal(`${modalHead('Copiar «' + src.name + '»')}<p class="small muted">Copia todas las opciones y alimentos de esta comida. «Reemplazar» borra las opciones de la comida de destino.</p>
+          ${dayVariants(root).map(v => `<h3 class="sm-h">${esc(dayLabel(v))}</h3><div class="pick-list">${v.meals.filter(x => x.id !== src.id).map(x => `<button class="pick-item" data-act="cpTo" data-p="${v.id}" data-m="${x.id}"><b>Reemplazar ${esc(x.name)}</b><small>${esc(x.time_label || '')}</small></button>`).join('')}<button class="pick-item" data-act="cpTo" data-p="${v.id}" data-m=""><b>Agregar como comida nueva</b><small>${esc(src.name)}</small></button></div>`).join('')}`, {
+          click: { cpTo: async b => { b.disabled = true; await copyMealInto(src, b.dataset.p, b.dataset.m || null); closeModal(); toast('Comida copiada'); rerender(); } }
+        });
+      },
       delMeal: async el => { if (!confirm('¿Eliminar esta comida con todas sus opciones?')) return; await DB.remove('plan_meals', el.dataset.id); rerender(); },
       addMeal: async () => { const name = prompt('Nombre de la comida:', 'Comida ' + (plan.meals.length + 1)); if (!name) return; const [m] = await DB.insert('plan_meals', { plan_id: id, name: name.trim(), time_label: '', instructions: '', position: plan.meals.length }); await DB.insert('plan_options', { meal_id: m.id, name: 'Opción 1', position: 0 }); rerender(); }
     }
   }, plan.is_template ? 'Plantilla nutricional' : 'Plan nutricional');
+}
+
+/* Copia las opciones de una comida en otra (o como comida nueva) de cualquier tipo de día */
+async function copyMealInto(src, planId, mealId) {
+  let target;
+  if (mealId) { target = (await DB.select('plan_meals', { eq: { id: mealId } }))[0]; for (const o of await DB.select('plan_options', { eq: { meal_id: mealId } })) await DB.remove('plan_options', o.id); }
+  else { const n = (await DB.select('plan_meals', { eq: { plan_id: planId } })).length; [target] = await DB.insert('plan_meals', { plan_id: planId, name: src.name, time_label: src.time_label, instructions: src.instructions, position: n }); }
+  for (const op of src.options) {
+    const [no] = await DB.insert('plan_options', Object.assign({ meal_id: target.id, name: op.name, position: op.position }, op.recipe ? { recipe: op.recipe } : {}, (op.weekdays || []).length ? { weekdays: op.weekdays } : {}));
+    await DB.insert('plan_items', op.items.map(i => ({ option_id: no.id, food_id: i.food_id, grams: i.grams, position: i.position, note: i.note })));
+  }
 }
 
 /* =====================================================================

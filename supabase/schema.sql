@@ -1374,5 +1374,164 @@ update public.app_settings
 set data = data || '{"schema_version": 7}'::jsonb, updated_at = now()
 where id = 1;
 
+-- #####################################################################
+--  Parte D · v9 · Registro rápido, seguimiento, cuestionarios, videos y acudientes
+-- #####################################################################
+
+-- ---------- Comidas guardadas por el asesorado ----------
+create table if not exists public.saved_meals (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references public.profiles(id) on delete cascade,
+  name text not null check (length(name) between 1 and 80),
+  items jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now());
+create index if not exists saved_meals_client_idx on public.saved_meals (client_id);
+alter table public.saved_meals enable row level security;
+drop policy if exists "comidas_guardadas_propias" on public.saved_meals;
+create policy "comidas_guardadas_propias" on public.saved_meals for all to authenticated
+  using (client_id = auth.uid()) with check (client_id = auth.uid());
+drop policy if exists "comidas_guardadas_staff" on public.saved_meals;
+create policy "comidas_guardadas_staff" on public.saved_meals for select to authenticated using (public.is_staff());
+
+-- ---------- Notas privadas del entrenador (el asesorado no las ve) ----------
+create table if not exists public.coach_notes (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references public.profiles(id) on delete cascade,
+  body text not null check (length(body) between 1 and 4000),
+  author_id uuid default auth.uid() references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now());
+create index if not exists coach_notes_client_idx on public.coach_notes (client_id, created_at desc);
+alter table public.coach_notes enable row level security;
+drop policy if exists "notas_staff" on public.coach_notes;
+create policy "notas_staff" on public.coach_notes for select to authenticated using (public.is_staff());
+drop policy if exists "notas_crear" on public.coach_notes;
+create policy "notas_crear" on public.coach_notes for insert to authenticated with check (public.is_staff());
+drop policy if exists "notas_borrar" on public.coach_notes;
+create policy "notas_borrar" on public.coach_notes for delete to authenticated using (public.is_coach());
+
+-- ---------- Cuestionarios enviados al asesorado ----------
+create table if not exists public.questionnaires (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references public.profiles(id) on delete cascade,
+  title text not null,
+  template jsonb not null,
+  answers jsonb not null default '{}'::jsonb,
+  score numeric, result text,
+  status text not null default 'pendiente' check (status in ('pendiente', 'respondido')),
+  created_at timestamptz not null default now(), answered_at timestamptz);
+create index if not exists questionnaires_client_idx on public.questionnaires (client_id, created_at desc);
+alter table public.questionnaires enable row level security;
+drop policy if exists "cuestionarios_leer" on public.questionnaires;
+create policy "cuestionarios_leer" on public.questionnaires for select to authenticated using (client_id = auth.uid() or public.is_staff());
+drop policy if exists "cuestionarios_crear" on public.questionnaires;
+create policy "cuestionarios_crear" on public.questionnaires for insert to authenticated with check (public.is_coach());
+drop policy if exists "cuestionarios_responder" on public.questionnaires;
+create policy "cuestionarios_responder" on public.questionnaires for update to authenticated
+  using (client_id = auth.uid() or public.is_coach()) with check (client_id = auth.uid() or public.is_coach());
+drop policy if exists "cuestionarios_borrar" on public.questionnaires;
+create policy "cuestionarios_borrar" on public.questionnaires for delete to authenticated using (public.is_coach());
+
+-- ---------- Videos de técnica del asesorado (archivo privado) ----------
+create table if not exists public.technique_videos (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references public.profiles(id) on delete cascade,
+  exercise_id uuid references public.exercises(id) on delete set null,
+  path text not null, note text, coach_reply text, replied_at timestamptz,
+  created_at timestamptz not null default now());
+create index if not exists technique_videos_client_idx on public.technique_videos (client_id, created_at desc);
+alter table public.technique_videos enable row level security;
+drop policy if exists "videos_tecnica_leer" on public.technique_videos;
+create policy "videos_tecnica_leer" on public.technique_videos for select to authenticated using (client_id = auth.uid() or public.is_staff());
+drop policy if exists "videos_tecnica_crear" on public.technique_videos;
+create policy "videos_tecnica_crear" on public.technique_videos for insert to authenticated with check (client_id = auth.uid());
+drop policy if exists "videos_tecnica_editar" on public.technique_videos;
+create policy "videos_tecnica_editar" on public.technique_videos for update to authenticated
+  using (client_id = auth.uid() or public.is_staff()) with check (client_id = auth.uid() or public.is_staff());
+drop policy if exists "videos_tecnica_borrar" on public.technique_videos;
+create policy "videos_tecnica_borrar" on public.technique_videos for delete to authenticated using (client_id = auth.uid() or public.is_coach());
+insert into storage.buckets (id, name, public) values ('client-videos', 'client-videos', false)
+on conflict (id) do nothing;
+drop policy if exists "videos_archivos_leer" on storage.objects;
+create policy "videos_archivos_leer" on storage.objects for select to authenticated
+  using (bucket_id = 'client-videos' and ((storage.foldername(name))[1] = auth.uid()::text or public.is_staff()));
+drop policy if exists "videos_archivos_subir" on storage.objects;
+create policy "videos_archivos_subir" on storage.objects for insert to authenticated
+  with check (bucket_id = 'client-videos' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "videos_archivos_borrar" on storage.objects;
+create policy "videos_archivos_borrar" on storage.objects for delete to authenticated
+  using (bucket_id = 'client-videos' and ((storage.foldername(name))[1] = auth.uid()::text or public.is_coach()));
+
+-- ---------- Datos del seguimiento que define el entrenador (próximo control) ----------
+create table if not exists public.client_meta (
+  client_id uuid primary key references public.profiles(id) on delete cascade,
+  next_review date, review_note text,
+  updated_at timestamptz not null default now());
+alter table public.client_meta enable row level security;
+drop policy if exists "meta_leer" on public.client_meta;
+create policy "meta_leer" on public.client_meta for select to authenticated using (client_id = auth.uid() or public.is_staff());
+drop policy if exists "meta_gestionar" on public.client_meta;
+create policy "meta_gestionar" on public.client_meta for all to authenticated using (public.is_coach()) with check (public.is_coach());
+
+-- ---------- Preferencias y autorizaciones del asesorado ----------
+create table if not exists public.client_prefs (
+  client_id uuid primary key references public.profiles(id) on delete cascade,
+  share_results boolean not null default false,
+  hide_face boolean not null default true,
+  updated_at timestamptz not null default now());
+alter table public.client_prefs enable row level security;
+drop policy if exists "prefs_propias" on public.client_prefs;
+create policy "prefs_propias" on public.client_prefs for all to authenticated
+  using (client_id = auth.uid()) with check (client_id = auth.uid());
+drop policy if exists "prefs_staff" on public.client_prefs;
+create policy "prefs_staff" on public.client_prefs for select to authenticated using (public.is_staff());
+
+-- ---------- Acceso de solo lectura para acudientes (enlace revocable) ----------
+create table if not exists public.guardian_links (
+  token text primary key default encode(gen_random_bytes(18), 'hex'),
+  client_id uuid not null references public.profiles(id) on delete cascade,
+  label text, revoked boolean not null default false,
+  created_at timestamptz not null default now());
+alter table public.guardian_links enable row level security;
+drop policy if exists "acudientes_propios" on public.guardian_links;
+create policy "acudientes_propios" on public.guardian_links for all to authenticated
+  using (client_id = auth.uid()) with check (client_id = auth.uid());
+drop policy if exists "acudientes_staff" on public.guardian_links;
+create policy "acudientes_staff" on public.guardian_links for select to authenticated using (public.is_staff());
+
+-- Resumen para el acudiente: solo datos generales, sin fotos, valoración ni mensajes
+create or replace function public.guardian_view(t text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare cid uuid; r jsonb;
+begin
+  select client_id into cid from public.guardian_links where token = t and not revoked;
+  if cid is null then return null; end if;
+  select jsonb_build_object(
+    'nombre', (select split_part(coalesce(full_name, ''), ' ', 1) from public.profiles where id = cid),
+    'objetivo', (select goal from public.profiles where id = cid),
+    'plan', (select jsonb_build_object('nombre', p.name, 'tipos', (
+        select coalesce(jsonb_agg(jsonb_build_object('codigo', v.day_code, 'nombre', v.day_name, 'dias', v.weekdays, 'kcal', v.kcal, 'proteina', v.protein_g, 'carbohidratos', v.carbs_g, 'grasa', v.fat_g, 'agua', v.water_ml) order by v.day_code), '[]'::jsonb)
+        from public.nutrition_plans v where v.id = p.id or v.variant_of = p.id))
+      from public.nutrition_plans p where p.client_id = cid and p.active and p.variant_of is null order by p.created_at desc limit 1),
+    'dias', (select coalesce(jsonb_agg(jsonb_build_object('fecha', d::date,
+        'alimentos', (select count(*) from public.food_logs f where f.client_id = cid and f.log_date = d::date),
+        'agua', (select water_ml from public.daily_logs x where x.client_id = cid and x.log_date = d::date),
+        'pasos', (select steps from public.daily_logs x where x.client_id = cid and x.log_date = d::date),
+        'habitos', (select (select count(*) from jsonb_object_keys(coalesce(x.choices -> '__h', '{}'::jsonb))) from public.daily_logs x where x.client_id = cid and x.log_date = d::date),
+        'entreno', (select count(*) from public.workouts w where w.client_id = cid and w.started_at::date = d::date)) order by d), '[]'::jsonb)
+      from generate_series(current_date - 13, current_date, interval '1 day') d),
+    'habitos', (select r2.data -> 'habits' from public.case_reports r2 where r2.client_id = cid and r2.visible and jsonb_array_length(coalesce(r2.data -> 'habits', '[]'::jsonb)) > 0 order by r2.created_at desc limit 1),
+    'proximo_control', (select next_review from public.client_meta where client_id = cid),
+    'competencias', (select coalesce(jsonb_agg(jsonb_build_object('nombre', name, 'fecha', start_date) order by start_date), '[]'::jsonb) from public.tournaments where client_id = cid and coalesce(end_date, start_date) >= current_date)
+  ) into r;
+  return r;
+end $$;
+revoke all on function public.guardian_view(text) from public;
+grant execute on function public.guardian_view(text) to anon, authenticated;
+
+-- ---------- Versión del esquema ----------
+update public.app_settings
+set data = data || '{"schema_version": 9}'::jsonb, updated_at = now()
+where id = 1;
+
 -- Último paso (después de registrarte en la app con tu correo):
 -- update public.profiles set role = 'coach' where email = 'TU_CORREO@ejemplo.com';

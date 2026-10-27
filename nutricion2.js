@@ -184,12 +184,12 @@ async function suplementosTab(cid) {
   const html = `<p class="small muted">Peso de referencia: ${fmtN(w)} kg. ${info.d.suplementos_ok ? 'Disposición del asesorado a usar suplementos: ' + esc(info.d.suplementos_ok) + '.' : ''}${info.d.creatina ? ' Creatina: ' + esc(info.d.creatina) + '.' : ''}</p>
     ${Object.entries(SUPPS).map(([k, s]) => { const x = items[k]; const done = logs.filter(l => l.supp_key === k).length; return `<div class="card supp${x ? ' on' : ''}">
       <label class="check"><input type="checkbox" data-sp="${k}" ${x ? 'checked' : ''} ${coach ? '' : 'disabled'}> <b>${esc(s.name)}</b>${s.minor && age && age < 18 ? ' <span class="badge bad">No recomendada en menores de 18</span>' : ''}</label>
-      <div class="rex-grid"><label><span>Dosis</span><input class="input" data-sd="${k}" value="${esc(x && x.dose || s.dose(w))}" ${coach ? '' : 'disabled'}></label><label><span>Momento</span><input class="input" data-st="${k}" value="${esc(x && x.timing || s.timing)}" ${coach ? '' : 'disabled'}></label></div>
+      <div class="rex-grid"><label><span>Dosis</span><input class="input" data-sd="${k}" value="${esc(x && x.dose || s.dose(w))}" ${coach ? '' : 'disabled'}></label><label><span>Momento</span><input class="input" data-st="${k}" value="${esc(x && x.timing || s.timing)}" ${coach ? '' : 'disabled'}></label><label><span>Recordatorio</span><input class="input" type="time" data-sh="${k}" value="${esc(x && x.hour || '')}" ${coach ? '' : 'disabled'}></label></div>
       ${s.load ? `<label class="check small"><input type="checkbox" data-sl="${k}" ${x && x.loading ? 'checked' : ''} ${coach ? '' : 'disabled'}> ${esc(s.load(w))}</label>` : ''}
       <p class="small muted">${esc(s.note)}</p>${x ? `<p class="small">Tomas registradas en 14 días: <b>${done}</b></p>` : ''}</div>`; }).join('')}
     ${(plan.items || []).filter(x => x.custom).map((x, i) => `<div class="card supp on">
       <label class="check"><input type="checkbox" data-cx="${i}" checked ${coach ? '' : 'disabled'}> <b>${esc(x.name)}</b> <span class="badge">Personalizado</span></label>
-      <div class="rex-grid"><label><span>Dosis</span><input class="input" data-cxd="${i}" value="${esc(x.dose || '')}" ${coach ? '' : 'disabled'}></label><label><span>Momento</span><input class="input" data-cxt="${i}" value="${esc(x.timing || '')}" ${coach ? '' : 'disabled'}></label></div>
+      <div class="rex-grid"><label><span>Dosis</span><input class="input" data-cxd="${i}" value="${esc(x.dose || '')}" ${coach ? '' : 'disabled'}></label><label><span>Momento</span><input class="input" data-cxt="${i}" value="${esc(x.timing || '')}" ${coach ? '' : 'disabled'}></label><label><span>Recordatorio</span><input class="input" type="time" data-cxh="${i}" value="${esc(x.hour || '')}" ${coach ? '' : 'disabled'}></label></div>
       ${x.note ? `<p class="small muted">${esc(x.note)}</p>` : ''}<p class="small">Tomas registradas en 14 días: <b>${logs.filter(l => l.supp_key === x.key).length}</b></p></div>`).join('')}
     ${coach ? '<div class="row-btns"><button class="btn sm" data-act="spCustom">+ Otro suplemento</button></div>' : ''}
     <label class="field"><span>Indicaciones generales</span><textarea class="input" id="sp-n" rows="3" ${coach ? '' : 'disabled'}>${esc(plan.notes || '')}</textarea></label>
@@ -200,8 +200,8 @@ async function suplementosTab(cid) {
     html, click: {
       ...docs,
       spSave: async () => {
-        const its = Object.keys(SUPPS).filter(k => $(`[data-sp=${k}]`).checked).map(k => ({ key: k, dose: $(`[data-sd=${k}]`).value.trim(), timing: $(`[data-st=${k}]`).value.trim(), loading: !!($(`[data-sl=${k}]`) && $(`[data-sl=${k}]`).checked) }));
-        (plan.items || []).filter(x => x.custom).forEach((x, i) => { if ($(`[data-cx="${i}"]`).checked) its.push(Object.assign({}, x, { dose: $(`[data-cxd="${i}"]`).value.trim(), timing: $(`[data-cxt="${i}"]`).value.trim() })); });
+        const its = Object.keys(SUPPS).filter(k => $(`[data-sp=${k}]`).checked).map(k => ({ key: k, dose: $(`[data-sd=${k}]`).value.trim(), timing: $(`[data-st=${k}]`).value.trim(), hour: ($(`[data-sh=${k}]`) || {}).value || '', loading: !!($(`[data-sl=${k}]`) && $(`[data-sl=${k}]`).checked) }));
+        (plan.items || []).filter(x => x.custom).forEach((x, i) => { if ($(`[data-cx="${i}"]`).checked) its.push(Object.assign({}, x, { dose: $(`[data-cxd="${i}"]`).value.trim(), timing: $(`[data-cxt="${i}"]`).value.trim(), hour: ($(`[data-cxh="${i}"]`) || {}).value || '' })); });
         const rec = { items: its, notes: $('#sp-n').value.trim() || null, updated_at: new Date().toISOString() };
         const ex = await supplementPlan(cid);
         if (ex) await DB.update('supplement_plans', cid, rec, 'client_id'); else await DB.insert('supplement_plans', Object.assign({ client_id: cid }, rec));
@@ -221,7 +221,7 @@ async function suplementosTab(cid) {
 async function supplementCardHtml() {
   const plan = await supplementPlan(S.profile.id); if (!plan || !(plan.items || []).length) return '';
   const logs = await DB.select('supplement_logs', { eq: { client_id: S.profile.id, log_date: todayStr() } });
-  return `<div class="card supp-today"><h3>Suplementos de hoy</h3>${plan.items.filter(x => suppOf(x)).map(x => { const done = logs.some(l => l.supp_key === x.key); return `<div class="fi${done ? ' done' : ''}"><button class="chk" data-act="supTick" data-k="${x.key}" aria-label="Marcar ${esc(suppOf(x).name)}">✓</button><div class="fi-b"><b>${esc(suppOf(x).name)}</b><small>${esc(x.dose)} · ${esc(x.timing)}</small></div></div>`; }).join('')}
+  return `<div class="card supp-today"><h3>Suplementos de hoy</h3>${plan.items.filter(x => suppOf(x)).map(x => { const done = logs.some(l => l.supp_key === x.key); return `<div class="fi${done ? ' done' : ''}"><button class="chk" data-act="supTick" data-k="${x.key}" aria-label="Marcar ${esc(suppOf(x).name)}">✓</button><div class="fi-b"><b>${esc(suppOf(x).name)}</b><small>${esc(x.dose)} · ${esc(x.timing)}${x.hour ? ' · ' + esc(x.hour) : ''}</small></div></div>`; }).join('')}
     <a class="small" href="#/suplementos">Ver protocolo completo</a></div>`;
 }
 const supplementHandlers = after => ({

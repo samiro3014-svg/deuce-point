@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0B406C">
+  <meta name="robots" content="noindex">
+  <title>Deuce Point · Acudiente</title>
+  <link rel="icon" href="favicon.png" type="image/png">
+  <style>
+    :root { --brand: #0B406C; --accent: #6FB232; --bg: #f3f5f1; --card: #fff; --line: #dce2d8; --text: #0f2a44; --muted: #5f6d79; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    header { background: var(--brand); color: #fff; padding: 20px 16px; display: flex; align-items: center; gap: 12px; }
+    header img { width: 54px; height: 54px; background: #fff; border-radius: 12px; padding: 4px; object-fit: contain; }
+    header h1 { font-size: 20px; margin: 0; } header p { margin: 2px 0 0; opacity: .85; font-size: 13px; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 0 16px 40px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; margin: 12px 0; }
+    h2 { font-size: 16px; color: var(--brand); margin: 0 0 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; } th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--line); } th { color: var(--muted); font-weight: 600; }
+    .bars { display: flex; align-items: flex-end; gap: 4px; height: 120px; border-bottom: 1px solid var(--line); margin-top: 8px; }
+    .bars .c { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; }
+    .bars .b { width: 70%; background: var(--brand); border-radius: 3px 3px 0 0; } .bars .b.ok { background: var(--accent); }
+    .bars small { font-size: 9px; color: var(--muted); margin-top: 3px; white-space: nowrap; }
+    .muted { color: var(--muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header><img src="logo.png" alt=""><div><h1 id="ttl">Seguimiento</h1><p>Vista de solo lectura para acudientes</p></div></header>
+  <div class="wrap" id="app"><div class="card"><p class="muted">Cargando…</p></div></div>
+  <script src="config.js"></script>
+  <script>
+    (async () => {
+      const app = document.getElementById('app'); const CFG = window.APP_CONFIG || {};
+      const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+      const t = new URLSearchParams(location.search).get('t');
+      const fail = m => { app.innerHTML = `<div class="card"><p>${esc(m)}</p></div>`; };
+      if (!t) return fail('Enlace incompleto.');
+      if (!CFG.SUPABASE_URL || !CFG.SUPABASE_ANON_KEY) return fail('Esta vista solo funciona con la aplicación conectada a la base de datos.');
+      let d = null;
+      try {
+        const r = await fetch(CFG.SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/rpc/guardian_view', { method: 'POST', headers: { apikey: CFG.SUPABASE_ANON_KEY, Authorization: 'Bearer ' + CFG.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ t }) });
+        d = await r.json();
+      } catch (e) { return fail('No se pudo cargar la información. Revisa la conexión.'); }
+      if (!d || d.code || d.message) return fail('El enlace no es válido o fue revocado por el asesorado.');
+      document.getElementById('ttl').textContent = 'Seguimiento de ' + (d.nombre || '');
+      const dm = s => { const x = new Date(s + 'T12:00:00'); return x.getDate() + '/' + (x.getMonth() + 1); };
+      const days = d.dias || []; const n = k => Number(k) || 0;
+      const bars = (vals, max, cls) => `<div class="bars">${vals.map(v => `<div class="c"><div class="b ${cls || ''}" style="height:${Math.max(2, Math.min(100, n(v.v) / (max || 1) * 100))}%" title="${esc(v.t)}"></div><small>${esc(v.l)}</small></div>`).join('')}</div>`;
+      let h = '';
+      if (d.objetivo) h += `<div class="card"><h2>Objetivo</h2><p>${esc(d.objetivo)}</p></div>`;
+      if (d.proximo_control || (d.competencias || []).length) h += `<div class="card"><h2>Próximas fechas</h2>${d.proximo_control ? `<p>Próximo control: <b>${esc(new Date(d.proximo_control + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' }))}</b></p>` : ''}${(d.competencias || []).map(c => `<p>${esc(c.nombre)}: <b>${esc(new Date(c.fecha + 'T12:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'long' }))}</b></p>`).join('')}</div>`;
+      if (d.plan) h += `<div class="card"><h2>Plan de alimentación: ${esc(d.plan.nombre)}</h2><table><thead><tr><th>Tipo de día</th><th>Días</th><th>kcal</th><th>Proteína</th><th>Carbohidratos</th></tr></thead><tbody>${(d.plan.tipos || []).map(x => `<tr><td>${esc([x.codigo, x.nombre].filter(Boolean).join(' · ') || 'Base')}</td><td>${esc((x.dias || []).map(s => s.slice(0, 3)).join(', '))}</td><td>${Math.round(n(x.kcal))}</td><td>${Math.round(n(x.proteina))} g</td><td>${Math.round(n(x.carbohidratos))} g</td></tr>`).join('')}</tbody></table></div>`;
+      h += `<div class="card"><h2>Alimentos registrados por día (14 días)</h2>${bars(days.map(x => ({ v: x.alimentos, l: dm(x.fecha), t: x.alimentos + ' registros' })), Math.max(1, ...days.map(x => n(x.alimentos))), 'ok')}</div>`;
+      h += `<div class="card"><h2>Agua por día (L)</h2>${bars(days.map(x => ({ v: n(x.agua) / 1000, l: dm(x.fecha), t: (n(x.agua) / 1000).toFixed(1) + ' L' })), Math.max(1, ...days.map(x => n(x.agua) / 1000)))}</div>`;
+      const hab = (d.habitos || []).length;
+      if (hab) h += `<div class="card"><h2>Hábitos cumplidos por día (de ${hab})</h2>${bars(days.map(x => ({ v: x.habitos, l: dm(x.fecha), t: x.habitos + ' hábitos' })), hab, 'ok')}<p class="muted">${(d.habitos || []).map(x => esc(x.text)).join(' · ')}</p></div>`;
+      h += `<div class="card"><h2>Sesiones de entrenamiento</h2><p>${days.reduce((a, x) => a + n(x.entreno), 0)} sesiones en los últimos 14 días.</p></div>`;
+      h += `<p class="muted">Información compartida por el asesorado. No incluye fotos, valoración, mensajes ni datos clínicos. El acceso se puede revocar en cualquier momento desde la aplicación.</p>`;
+      app.innerHTML = h;
+    })();
+  </script>
+</body>
+</html>

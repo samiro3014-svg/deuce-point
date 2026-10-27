@@ -136,9 +136,10 @@ async function loadSettings() {
   catch (e) { console.warn('app_settings no disponible: ejecutar supabase/migracion-v3.sql', e); S.needsMigration = true; }
   S.needsV4 = !(r && r.data && num(r.data.schema_version) >= 4);
   S.needsV5 = !(r && r.data && num(r.data.schema_version) >= 5);
-  if (DEMO && r && r.data && num(r.data.schema_version) < 7) { r.data.schema_version = 7; await DB.update('app_settings', 1, { data: r.data }); }
+  if (DEMO && r && r.data && num(r.data.schema_version) < 9) { r.data.schema_version = 9; await DB.update('app_settings', 1, { data: r.data }); }
   S.needsV6 = !(r && r.data && num(r.data.schema_version) >= 6);
   S.needsV7 = !(r && r.data && num(r.data.schema_version) >= 7);
+  S.needsV9 = !(r && r.data && num(r.data.schema_version) >= 9);
   S.settings = Object.assign({}, SETTINGS_DEF, r ? r.data || {} : {});
 }
 async function saveSettings(patch) {
@@ -956,7 +957,8 @@ function dayCompletion(plan, dayLogs, daily, date) {
   const ch = (daily && daily.choices) || {}; let total = 0, done = 0;
   date = date || (daily && daily.log_date) || (dayLogs[0] && dayLogs[0].log_date) || null;
   if (date) plan = planForDate(plan, date, ch.__dtype);
-  plan.meals.forEach(me => { const o = chosenOption(me, ch, date); if (!o) return; total += o.items.length; done += o.items.filter(i => dayLogs.some(l => l.plan_item_id === i.id)).length; });
+  const rep = ch.__rep || {};
+  plan.meals.forEach(me => { const o = chosenOption(me, ch, date); if (!o) return; if (rep[me.id] && dayLogs.some(l => l.meal_id === me.id)) { total += o.items.length; done += o.items.length; return; } total += o.items.length; done += o.items.filter(i => dayLogs.some(l => l.plan_item_id === i.id)).length; });
   return total ? Math.round(done / total * 100) : null;
 }
 function suggestAdjust(goal, ck, prev, adh) {
@@ -1106,6 +1108,9 @@ async function inboxInner(clients) {
   if (typeof inboxMessageRows === 'function') rows.push(...await inboxMessageRows(byId));
   if (typeof inboxLeadRows === 'function') rows.push(...await inboxLeadRows());
   if (typeof inboxCaseRows === 'function') rows.push(...await inboxCaseRows(byId));
+  if (typeof inboxV9Rows === 'function') rows.push(...await inboxV9Rows(byId).catch(() => []));
+  if (typeof inboxVideoRows === 'function') rows.push(...await inboxVideoRows(byId));
+  if (typeof inboxQuestRows === 'function') rows.push(...await inboxQuestRows(byId));
   intakes.filter(i => byId[i.client_id]).forEach(i => rows.push(`<a class="ib-row" href="#/asesorado/${i.client_id}/valoracion"><span class="ib-tag v">Valoración</span><span class="ib-n">${esc(byId[i.client_id].full_name || byId[i.client_id].email)}</span><span class="ib-m">${(i.flags || []).filter(f => f.level !== 'info').length ? `<span class="warn">${(i.flags || []).filter(f => f.level !== 'info').length} alertas</span>` : 'Sin alertas'}</span></a>`));
   cks.filter(c => byId[c.client_id]).forEach(c => rows.push(`<a class="ib-row" href="#/asesorado/${c.client_id}/checkins"><span class="ib-tag c">Check-in</span><span class="ib-n">${esc(byId[c.client_id].full_name || '')}</span><span class="ib-m">${fmtDM(parseDay(c.check_date))}</span></a>`));
   inactive.forEach(c => rows.push(`<div class="ib-row"><span class="ib-tag i">Inactivo</span><a class="ib-n" href="#/asesorado/${c.id}/seguimiento">${esc(c.full_name || c.email)}</a><span class="ib-m">${lastAct[c.id] ? daysBetween(lastAct[c.id], todayStr()) + ' días' : 'sin registros'} ${waBtn(c.phone, `Hola ${firstName(c.full_name)}, ¿cómo vas con tu plan esta semana? Recuerda registrar tus comidas y entrenamientos en Deuce Point.`, 'WhatsApp', 'chip wa')}</span></div>`));
@@ -1169,6 +1174,9 @@ async function vAjustes() {
       <p class="small muted">Enlace y código QR en Negocio › Página y QR.</p></div>
     ${typeof vapidCardHtml === 'function' ? await vapidCardHtml() : ''}
     ${typeof apiUsageCardHtml === 'function' ? await apiUsageCardHtml() : ''}
+    ${typeof autoMsgCardHtml === 'function' ? autoMsgCardHtml() : ''}
+    ${typeof qTemplatesCardHtml === 'function' && !S.needsV9 ? qTemplatesCardHtml() : ''}
+    <div class="card"><h3>Medidas con la mano</h3><p class="small muted">Equivalencias que ve el asesorado cuando elige «Mano» en vez de gramos.</p><div class="rex-grid three"><label><span>Palma (g de proteína cocida)</span><input class="input" data-s="hand_palm_g" data-num="1" inputmode="numeric" value="${esc(s.hand_palm_g ?? 100)}"></label><label><span>Puño (g de cereal o tubérculo cocido)</span><input class="input" data-s="hand_fist_g" data-num="1" inputmode="numeric" value="${esc(s.hand_fist_g ?? 150)}"></label><label><span>Pulgar (g de grasa)</span><input class="input" data-s="hand_thumb_g" data-num="1" inputmode="numeric" value="${esc(s.hand_thumb_g ?? 10)}"></label></div></div>
     <div class="card"><h3>Preguntas adicionales de la valoración inicial</h3>
       <label class="field"><span>Una pregunta por línea. Para preguntas de opción: Pregunta | opción 1 / opción 2 / opción 3</span><textarea class="input" rows="5" data-s="extra_questions" placeholder="¿A qué hora empieza tu entrenamiento principal?\n¿Usas anticoncepción hormonal? | Sí / No / Prefiero no responder\n¿Cuánto tiempo tienes para cocinar al día? | Menos de 30 min / 30 a 60 min / Más de 60 min">${esc(s.extra_questions || '')}</textarea></label>
       <p class="small muted">Se agregan como un paso adicional antes de las autorizaciones. Las respuestas aparecen en la valoración y en el paquete de análisis para tu IA. A los asesorados actuales puedes enviarles preguntas desde su expediente.</p></div>
@@ -1181,7 +1189,7 @@ async function vAjustes() {
       const v = t.type === 'checkbox' ? t.checked : t.dataset.num ? (t.value.trim() === '' ? null : num(t.value)) : t.value.trim();
       await saveSettings({ [k]: v }); toast('Guardado');
     },
-    click: Object.assign({}, typeof coachKeyHandlers === 'function' ? coachKeyHandlers() : {}, typeof vapidHandlers === 'object' ? vapidHandlers : {})
+    click: Object.assign({}, typeof coachKeyHandlers === 'function' ? coachKeyHandlers() : {}, typeof vapidHandlers === 'object' ? vapidHandlers : {}, typeof qTemplateHandlers === 'object' ? qTemplateHandlers : {}, typeof autoMsgSettingsHandlers === 'object' ? autoMsgSettingsHandlers : {})
   }, 'Ajustes');
 }
 
@@ -1216,7 +1224,7 @@ function buildAutoDemo(d) {
   const ana = d.profiles.find(p => p.id === 'demo-ana'), juan = d.profiles.find(p => p.id === 'demo-juan');
   if (ana) ana.phone = '3001112233'; if (juan) juan.phone = '3004445566';
   const tpl = d.nutrition_plans.find(p => p.is_template);
-  d.app_settings.push({ id: 1, data: Object.assign({}, SETTINGS_DEF, { whatsapp: '3009998877', tpl_default: tpl ? tpl.id : '', schema_version: 7 }), updated_at: iso });
+  d.app_settings.push({ id: 1, data: Object.assign({}, SETTINGS_DEF, { whatsapp: '3009998877', tpl_default: tpl ? tpl.id : '', schema_version: 9 }), updated_at: iso });
   d.memberships.push({ id: uid(), client_id: 'demo-juan', plan_name: 'Mensual', start_date: addDays(today, -27), end_date: addDays(today, 3), amount: 180000, notes: 'Pago por transferencia', archived: false, updated_at: iso },
     { id: uid(), client_id: 'demo-ana', plan_name: 'Trimestral', start_date: addDays(today, -42), end_date: addDays(today, 48), amount: null, notes: null, archived: false, updated_at: iso });
   const base = { ciudad: 'Bogotá', trabajo: 'Sentado la mayor parte del día', pq1: 'No', pq2: 'No', pq3: 'No', pq4: 'No', pq5: 'No', pq6: 'No', pq7: 'No', enfermedades: ['Ninguna'], sc1: 'No', sc2: 'No', sc3: 'No', sc4: 'No', sc5: 'No', restricciones: ['Ninguna'], sueno: '7 a 8', lugar: 'Gimnasio', minutos: '60 min', consentimiento: 'Sí', datos: 'Sí', importancia: '9' };

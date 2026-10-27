@@ -6,6 +6,32 @@ Dirección: https://samiro3014-svg.github.io/deuce-point/
 
 ---
 
+## Novedades de la versión 9 · registro rápido, días difíciles y seguimiento
+
+**Para el asesorado (pantalla Hoy)**
+- **Más** en cada comida: copiar otra comida del día (porciones ajustadas a las kcal de la comida de destino; cuenta como comida cumplida), repetir lo de ayer, comidas guardadas, porción 75 / 100 / 125 % y «¿Cómo te sentó?» (saciedad y digestión).
+- **Siguiente comida** arriba, con «Marcar todo». **Gramos o Mano** (palmas, puños, pulgares; equivalencias en Ajustes). **Botella propia** para el agua.
+- **Acciones rápidas:** semana del plan, repetir el día de ayer, evento social (cuenta la comida y compensa hasta 15 % de las kcal en los 3 días siguientes, configurable), otras actividades (carrera, bicicleta, clase, etc., suman al gasto) y «No pude seguir el plan» (motivo y detalle; llega a tu bandeja).
+- **Recorrido inicial** de 4 pasos, **resumen semanal** (domingo y lunes), **modo competencia** (línea de tiempo del protocolo con la hora de inicio y alarmas en el calendario), **modo oscuro** y **letra grande** (Perfil).
+- **Preparación en lote:** cantidades a cocinar en cada día de preparación, en cocido y en crudo.
+- **Modo cocina** en Preparación: pasos grandes, pantalla encendida y temporizadores.
+- **Entreno:** sugerencia de ajuste si el bienestar del día está en amarillo o rojo, calentamiento según los grupos musculares, aviso de récord al completar una serie, alternativas por equipo (máquina ocupada) y **video de técnica** para enviar al entrenador.
+- **Perfil:** videos de técnica, acceso para acudientes (enlace de solo lectura revocable), autorización para mostrar resultados y **Mis datos** en PDF, HTML y Excel.
+- **Notificaciones con acción:** «Marcar como hecha» en comidas, «+250 ml» en agua y «Tomado» en suplementos (hora del recordatorio en el protocolo de suplementos).
+
+**Para el entrenador**
+- **Semáforo** en la lista de asesorados (registro, bienestar, molestias, días sin seguir el plan) con el motivo.
+- **Bandeja:** mensajes sugeridos o automáticos por regla (3 días sin registro, 7 días cumpliendo hábitos, meta alcanzada, check-in atrasado), plan para revisar por antigüedad, próximo control, metas vencidas, «no siguió el plan», videos y cuestionarios respondidos.
+- **Ficha:** próximo control, notas privadas, cuestionarios (plantillas propias con puntaje y rangos en Ajustes), videos de técnica con respuesta, hábitos de alimentación (reemplazos frecuentes, comidas reemplazadas, saciedad y digestión), comparación entre expedientes y tarjeta de resultados (solo con autorización).
+- **Editor:** copiar una comida en otra o en otro tipo de día. **Anexo:** `IGUAL: Almuerzo` para repetir una comida sin reescribir los alimentos.
+- El paquete para la IA incluye reemplazos, comidas reemplazadas, saciedad, días sin seguir el plan y cuestionarios.
+
+## Actualización a la versión 9
+1. **Supabase › SQL Editor:** ejecutar `supabase/migracion-v9.sql` (incluye v4 a v7).
+2. Si usas notificaciones push: volver a publicar `enviar-notificaciones` con el archivo actualizado (acciones en las notificaciones, recordatorio de suplementos y resumen semanal).
+3. Ajustes: plantillas de cuestionarios, reglas de mensajes automáticos, semanas para revisar el plan, compensación máxima por evento y medidas con la mano.
+4. En tu IA: reemplazar la instrucción por el nuevo «Formato del informe» (agrega `IGUAL:` y la hora en `SUPLEMENTO:`).
+
 ## Novedades de la versión 8 · personalización y experiencia
 
 - **Hábitos diarios:** el anexo admite `HABITO: acción | frecuencia`. El asesorado los marca en Hoy y el cumplimiento de 7 días aparece en el expediente y en el paquete para la IA. También se agregan o quitan desde el expediente.
